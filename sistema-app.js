@@ -4,10 +4,37 @@
 // Requer Node 18+ (usa fetch/AbortSignal nativos)
 
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const MemoryStore = require('memorystore')(session);
+
+// -------- carrega .env manualmente (sem depender de dotenv) --------
+(function loadEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+  try {
+    const content = fs.readFileSync(envPath, 'utf8');
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx < 0) continue;
+      const key = trimmed.slice(0, idx).trim();
+      let val = trimmed.slice(idx + 1).trim();
+      // remove aspas simples ou duplas ao redor
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      // nao sobrescreve env ja definida (permite override via PM2/systemd)
+      if (!(key in process.env)) process.env[key] = val;
+    }
+    console.log('[sistema] .env carregado');
+  } catch (err) {
+    console.error('[sistema] erro ao carregar .env:', err.message);
+  }
+})();
 
 const { db, getSetting, setSetting } = require('./db');
 const auth = require('./routes/auth');
