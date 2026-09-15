@@ -1,0 +1,146 @@
+/* Cargon Sistema - estilos minimos */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --preto: #0f0f0f;
+  --preto-2: #1a1a1a;
+  --amarelo: #FFA500;
+  --amarelo-2: #ffc04d;
+  --cinza: #f4f4f5;
+  --cinza-2: #e4e4e7;
+  --cinza-3: #a1a1aa;
+  --texto: #18181b;
+  --branco: #ffffff;
+  --verde: #10b981;
+  --vermelho: #ef4444;
+  --azul: #3b82f6;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--cinza);
+  color: var(--texto);
+  min-height: 100vh;
+}
+
+/* ============ LOGIN ============ */
+.login-body {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; background: var(--preto);
+  background-image: radial-gradient(circle at 20% 30%, rgba(255,165,0,0.15) 0%, transparent 40%);
+}
+.login-card {
+  background: var(--branco); padding: 3rem 2.5rem;
+  border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  width: 100%; max-width: 400px;
+}
+.login-brand h1 {
+  font-size: 1.8rem; letter-spacing: 2px; margin-bottom: 0.25rem;
+}
+.login-brand h1 span { color: var(--amarelo); font-weight: 900; }
+.login-brand p { color: var(--cinza-3); font-size: 0.85rem; margin-bottom: 2rem; }
+.login-form label { display: block; margin-bottom: 1rem; font-size: 0.85rem; font-weight: 600; }
+.login-form input {
+  width: 100%; padding: 0.75rem; margin-top: 0.25rem;
+  border: 1px solid var(--cinza-2); border-radius: 6px; font-size: 1rem;
+  transition: border-color 0.15s;
+}
+.login-form input:focus { outline: none; border-color: var(--amarelo); }
+.login-error { color: var(--vermelho); font-size: 0.85rem; margin-top: 0.75rem; min-height: 1.2em; }
+
+.btn-primary {
+  background: var(--amarelo); color: var(--preto);
+  border: none; padding: 0.75rem 1.5rem;
+  font-weight: 700; font-size: 0.95rem;
+  border-radius: 6px; cursor: pointer;
+  transition: background 0.15s;
+  width: 100%;
+}
+.btn-primary:hover { background: var(--amarelo-2); }
+.btn-secondary {
+  background: transparent; color: var(--cinza-2);
+  border: 1px solid var(--cinza-3); padding: 0.5rem 1rem;
+  border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+  transition: all 0.15s;
+}
+.btn-secondary:hover { background: var(--cinza-2); color: var(--preto); }
+
+/* ============ APP LAYOUT ============ */
+body:has(.sidebar) { display: flex; }
+
+.sidebar {
+  width: 240px; min-height: 100vh; background: var(--preto);
+  color: var(--branco); padding: 1.5rem 0;
+  display: flex; flex-direction: column;
+  position: fixed; left: 0; top: 0; bottom: 0;
+}
+.brand { padding: 0 1.5rem 1.5rem; border-bottom: 1px solid #333; }
+.brand h1 { font-size: 1.3rem; letter-spacing: 2px; }
+.brand h1 span { color: var(--amarelo); font-weight: 900; }
+.sidebar nav { flex: 1; padding: 1rem 0; }
+.sidebar nav a {
+  display: block; padding: 0.75rem 1.5rem;
+  color: var(--cinza-2); text-decoration: none; font-size: 0.9rem;
+  border-left: 3px solid transparent;
+  transition: all 0.15s;
+}
+.sidebar nav a:hover { background: var(--preto-2); color: var(--branco); }
+.sidebar nav a.active { background: var(--preto-2); color: var(--amarelo); border-left-color: var(--amarelo); }
+.sidebar-footer { padding: 1rem 1.5rem; border-top: 1px solid #333; font-size: 0.85rem; }
+.sidebar-footer #userInfo { margin-bottom: 0.5rem; color: var(--cinza-3); }
+
+main { margin-left: 240px; padding: 2rem; flex: 1; }
+
+.loading { color: var(--cinza-3); padding: 2rem; text-align: center; }
+
+/* ============ PAGE ============ */
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+.page-header h2 { font-size: 1.5rem; }
+.page-header .actions { display: flex; gap: 0.5rem; }
+
+.card { background: var(--branco); border-radius: 10px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.card + .card { margin-top: 1rem; }
+.card h3 { font-size: 1rem; margin-bottom: 1rem; color: var(--texto); }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.kpi { background: var(--branco); padding: 1.25rem; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.kpi .kpi-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--cinza-3); margin-bottom: 0.5rem; }
+.kpi .kpi-value { font-size: 1.75rem; font-weight: 700; }
+.kpi .kpi-sub { font-size: 0.8rem; color: var(--cinza-3); margin-top: 0.25rem; }
+.kpi.warn .kpi-value { color: var(--vermelho); }
+.kpi.ok .kpi-value { color: var(--verde); }
+
+table { width: 100%; border-collapse: collapse; }
+table th { text-align: left; font-size: 0.75rem; text-transform: uppercase; color: var(--cinza-3); font-weight: 600; padding: 0.75rem; border-bottom: 1px solid var(--cinza-2); }
+table td { padding: 0.75rem; border-bottom: 1px solid var(--cinza); font-size: 0.9rem; }
+table tr:last-child td { border-bottom: none; }
+table tr:hover td { background: var(--cinza); }
+
+.badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.badge.ok { background: rgba(16,185,129,0.15); color: var(--verde); }
+.badge.warn { background: rgba(255,165,0,0.2); color: #b56900; }
+.badge.critico { background: rgba(239,68,68,0.15); color: var(--vermelho); }
+.badge.canal-ml { background: #FFF3D9; color: #8b6b0f; }
+.badge.canal-site { background: #DBE9FF; color: #1f3f8f; }
+.badge.canal-tiktok { background: #F5D5FF; color: #7a1fa2; }
+
+form.inline { display: flex; gap: 0.5rem; align-items: center; }
+input, select, textarea {
+  padding: 0.5rem 0.75rem; border: 1px solid var(--cinza-2); border-radius: 6px;
+  font-size: 0.9rem; font-family: inherit;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--amarelo); }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+.form-grid label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem; }
+.form-grid input, .form-grid select, .form-grid textarea { width: 100%; }
+
+.text-right { text-align: right; }
+.text-muted { color: var(--cinza-3); }
+.text-small { font-size: 0.85rem; }
+.mt-1 { margin-top: 1rem; }
+.mb-1 { margin-bottom: 1rem; }
+
+.value-money { font-variant-numeric: tabular-nums; font-weight: 600; }
+.value-money.negativo { color: var(--vermelho); }
+.value-money.positivo { color: var(--verde); }

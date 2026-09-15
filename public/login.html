@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cargon Sistema - Login</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-brand">
+      <h1>CARGON<span>PARTS</span></h1>
+      <p>Sistema de gestao</p>
+    </div>
+    <form id="loginForm" class="login-form">
+      <label>
+        E-mail
+        <input type="email" id="email" name="email" required autocomplete="email" />
+      </label>
+      <label>
+        Senha
+        <input type="password" id="senha" name="senha" required autocomplete="current-password" />
+      </label>
+      <button type="submit" class="btn-primary">Entrar</button>
+      <div id="loginError" class="login-error"></div>
+    </form>
+  </div>
+  <script>
+    const form = document.getElementById('loginForm');
+    const errBox = document.getElementById('loginError');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errBox.textContent = '';
+      const email = document.getElementById('email').value.trim();
+      const senha = document.getElementById('senha').value;
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, senha }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'erro');
+        window.location.href = '/app.html';
+      } catch (err) {
+        errBox.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+node_modules/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+.env
+.env.local
+.DS_Store
+Thumbs.db
+*.log
+logs/
+tmp/
+uploads/
+.vscode/
+.idea/
