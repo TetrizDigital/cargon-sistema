@@ -11,18 +11,18 @@ async function api(pathReq, opts = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });
-  if (r.status === 401) { window.location.href = '/login'; throw new Error('nao autenticado'); }
+  if (r.status === 401) { window.location.href = 'login'; throw new Error('nao autenticado'); }
   const data = await r.json();
   if (!r.ok) throw new Error(data.error || 'erro');
   return data;
 }
 
 async function boot() {
-  const user = await api('/api/auth/me');
+  const user = await api('api/auth/me');
   $('#userInfo').textContent = user.name;
   $('#logoutBtn').addEventListener('click', async () => {
-    await api('/api/auth/logout', { method: 'POST' });
-    window.location.href = '/login';
+    await api('api/auth/logout', { method: 'POST' });
+    window.location.href = 'login';
   });
   window.addEventListener('hashchange', route);
   route();
@@ -43,9 +43,9 @@ const routes = {};
 // ============ DASHBOARD ============
 routes.dashboard = async () => {
   const [resumo, estoque, vendas] = await Promise.all([
-    api('/api/financeiro/resumo'),
-    api('/api/estoque'),
-    api('/api/vendas?limit=10'),
+    api('api/financeiro/resumo'),
+    api('api/estoque'),
+    api('api/vendas?limit=10'),
   ]);
 
   $('#content').innerHTML = `
@@ -113,7 +113,7 @@ function badgeCanal(c) {
 
 // ============ PRODUTOS ============
 routes.produtos = async () => {
-  const produtos = await api('/api/produtos');
+  const produtos = await api('api/produtos');
   $('#content').innerHTML = `
     <div class="page-header">
       <h2>Produtos (${produtos.length})</h2>
@@ -160,7 +160,7 @@ function rowProduto(p) {
 
 // ============ ESTOQUE ============
 routes.estoque = async () => {
-  const data = await api('/api/estoque');
+  const data = await api('api/estoque');
   $('#content').innerHTML = `
     <div class="page-header"><h2>Estoque</h2></div>
     <div class="kpi-grid">
@@ -192,7 +192,7 @@ routes.estoque = async () => {
 
 // ============ VENDAS ============
 routes.vendas = async () => {
-  const vendas = await api('/api/vendas?limit=200');
+  const vendas = await api('api/vendas?limit=200');
   $('#content').innerHTML = `
     <div class="page-header"><h2>Vendas (${vendas.length})</h2></div>
     <div class="card">
@@ -221,8 +221,8 @@ routes.vendas = async () => {
 
 // ============ FINANCEIRO ============
 routes.financeiro = async () => {
-  const resumo = await api('/api/financeiro/resumo');
-  const lancamentos = await api('/api/financeiro/lancamentos');
+  const resumo = await api('api/financeiro/resumo');
+  const lancamentos = await api('api/financeiro/lancamentos');
   $('#content').innerHTML = `
     <div class="page-header"><h2>Financeiro</h2></div>
     <div class="kpi-grid">
@@ -268,14 +268,14 @@ routes.financeiro = async () => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const body = Object.fromEntries(fd);
-    await api('/api/financeiro/lancamentos', { method: 'POST', body: JSON.stringify(body) });
+    await api('api/financeiro/lancamentos', { method: 'POST', body: JSON.stringify(body) });
     routes.financeiro();
   });
 };
 
 // ============ CUSTOS FIXOS RECORRENTES ============
 routes.recorrentes = async () => {
-  const rows = await api('/api/financeiro/recorrentes');
+  const rows = await api('api/financeiro/recorrentes');
   $('#content').innerHTML = `
     <div class="page-header"><h2>Custos fixos recorrentes</h2></div>
     <div class="card">
@@ -312,14 +312,14 @@ routes.recorrentes = async () => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const body = Object.fromEntries(fd);
-    await api('/api/financeiro/recorrentes', { method: 'POST', body: JSON.stringify(body) });
+    await api('api/financeiro/recorrentes', { method: 'POST', body: JSON.stringify(body) });
     routes.recorrentes();
   });
 };
 
 // ============ SYNC ============
 routes.sync = async () => {
-  const status = await api('/api/sync/status');
+  const status = await api('api/sync/status');
   $('#content').innerHTML = `
     <div class="page-header">
       <h2>Sincronizacao de canais</h2>
@@ -364,20 +364,20 @@ routes.sync = async () => {
   `;
   $('#btnSyncML').addEventListener('click', async () => {
     try {
-      const r = await api('/api/sync/mercadolivre', { method: 'POST' });
+      const r = await api('api/sync/mercadolivre', { method: 'POST' });
       alert(`ML: ${r.processados} pedidos processados`);
       routes.sync();
     } catch (err) {
       if (err.message.includes('nao autenticado')) {
         if (confirm('ML nao autenticado. Autorizar agora?')) {
-          window.location.href = '/api/ml/authorize';
+          window.location.href = 'api/ml/authorize';
         }
       } else alert('Erro: ' + err.message);
     }
   });
   $('#btnSyncSite').addEventListener('click', async () => {
     try {
-      const r = await api('/api/sync/site', { method: 'POST' });
+      const r = await api('api/sync/site', { method: 'POST' });
       alert(`Site: ${r.processados} pedidos processados`);
       routes.sync();
     } catch (err) {
@@ -388,5 +388,5 @@ routes.sync = async () => {
 
 boot().catch(err => {
   console.error(err);
-  window.location.href = '/login';
+  window.location.href = 'login';
 });
