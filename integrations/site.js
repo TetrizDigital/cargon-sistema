@@ -1,5 +1,5 @@
 // Integracao com o site cargonparts.com.br (endpoint /api/sync/pedidos)
-const axios = require('axios');
+// Usa fetch nativo do Node 18+
 const { db } = require('../db');
 
 function cfg() {
@@ -21,13 +21,17 @@ async function syncVendas() {
     `).get().max_data;
     const since = ultima || new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
 
-    const r = await axios.get(`${c.baseUrl}/api/sync/pedidos`, {
-      params: { since, limit: 100 },
+    const url = new URL(`${c.baseUrl}/api/sync/pedidos`);
+    url.searchParams.set('since', since);
+    url.searchParams.set('limit', '100');
+    const r = await fetch(url.toString(), {
       headers: { 'X-Api-Key': c.apiKey },
-      timeout: 20_000,
+      signal: AbortSignal.timeout(20_000),
     });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
 
-    for (const p of (r.data.pedidos || r.data.orders || [])) {
+    for (const p of (data.pedidos || data.orders || [])) {
       upsertVendaSite(p);
       processados++;
     }

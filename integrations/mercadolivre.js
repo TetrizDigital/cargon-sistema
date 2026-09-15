@@ -1,5 +1,5 @@
 // Integracao Mercado Livre: OAuth + sync de vendas
-const axios = require('axios');
+// Usa fetch nativo do Node 18+ (sem axios pra evitar dep extra)
 const { db } = require('../db');
 
 const BASE_URL = 'https://api.mercadolibre.com';
@@ -13,6 +13,15 @@ function cfg() {
   };
 }
 
+async function httpJson(url, opts = {}) {
+  const r = await fetch(url, { ...opts, headers: { Accept: 'application/json', ...(opts.headers || {}) } });
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    throw new Error(`HTTP ${r.status} ${url}: ${t.slice(0, 200)}`);
+  }
+  return r.json();
+}
+
 function buildAuthUrl() {
   const c = cfg();
   return `${AUTH_URL}?response_type=code&client_id=${c.clientId}&redirect_uri=${encodeURIComponent(c.redirectUri)}`;
@@ -20,14 +29,17 @@ function buildAuthUrl() {
 
 async function exchangeCodeForToken(code) {
   const c = cfg();
-  const resp = await axios.post(`${BASE_URL}/oauth/token`, new URLSearchParams({
-    grant_type: 'authorization_code',
-    client_id: c.clientId,
-    client_secret: c.clientSecret,
-    code,
-    redirect_uri: c.redirectUri,
-  }));
-  const t = resp.data;
+  const t = await httpJson(`${BASE_URL}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: c.clientId,
+      client_secret: c.clientSecret,
+      code,
+      redirect_uri: c.redirectUri,
+    }).toString(),
+  });
   saveToken(t);
   return t;
 }
@@ -47,14 +59,18 @@ function saveToken(t) {
 
 async function refreshToken(row) {
   const c = cfg();
-  const resp = await axios.post(`${BASE_URL}/oauth/token`, new URLSearchParams({
-    grant_type: 'refresh_token',
-    client_id: c.clientId,
-    client_secret: c.clientSecret,
-    refresh_token: row.refresh_token,
-  }));
-  saveToken(resp.data);
-  return resp.data.access_token;
+  const t = await httpJson(`${BASE_URL}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: c.clientId,
+      client_secret: c.clientSecret,
+      refresh_token: row.refresh_token,
+    }).toString(),
+  });
+  saveToken(t);
+  return t.access_token;
 }
 
 async function getAccessToken() {
@@ -70,12 +86,12 @@ async function getAccessToken() {
 
 async function apiGet(pathReq, params = {}) {
   const token = await getAccessToken();
-  const r = await axios.get(BASE_URL + pathReq, {
-    params,
+  const url = new URL(BASE_URL + pathReq);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  return await httpJson(url.toString(), {
     headers: { Authorization: `Bearer ${token}` },
-    timeout: 20_000,
+    signal: AbortSignal.timeout(20_000),
   });
-  return r.data;
 }
 
 // -------- Sync de vendas --------

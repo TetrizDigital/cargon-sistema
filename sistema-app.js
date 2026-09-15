@@ -1,6 +1,7 @@
 // Cargon Sistema - Express sub-app
 // Feito para ser montado em outra app: app.use('/sistema', require('./sistema/sistema-app'))
 // Tambem pode rodar standalone via server.js (dev local)
+// Requer Node 18+ (usa fetch/AbortSignal nativos)
 
 const path = require('path');
 const crypto = require('crypto');

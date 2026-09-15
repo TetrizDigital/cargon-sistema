@@ -1,6 +1,6 @@
 // Modo standalone — usado apenas para dev local ou testes.
 // Em producao o sistema-app.js e' montado dentro do server.js do site principal.
-require('dotenv').config();
+try { require('dotenv').config(); } catch (_) { /* dotenv opcional */ }
 
 const express = require('express');
 const sistemaApp = require('./sistema-app');
