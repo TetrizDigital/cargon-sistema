@@ -174,6 +174,15 @@ if (process.env.SYNC_ENABLED === 'true' && !global.__sistema_cron_started) {
   console.log('[sistema] jobs de sync agendados (setInterval)');
 }
 
+// -------- seed automatico dos 14 SKUs (so na primeira execucao) --------
+try {
+  const { seedProdutos } = require('./scripts/seed-produtos');
+  const r = seedProdutos();
+  if (!r.skipped) console.log('[sistema] seed: ' + r.count + ' produtos, ' + r.pecas + ' pecas');
+} catch (err) {
+  console.error('[sistema] falha no seed:', err.message);
+}
+
 // -------- setup inicial de usuarios (idempotente) --------
 try {
   const bcrypt = require('bcryptjs');
