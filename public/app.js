@@ -41,20 +41,60 @@ function route() {
 const routes = {};
 
 // ============ DASHBOARD ============
+function periodoDoMes(offsetMeses = 0) {
+  const now = new Date();
+  now.setMonth(now.getMonth() + offsetMeses);
+  const ano = now.getFullYear();
+  const mes = now.getMonth();
+  const de = new Date(ano, mes, 1).toISOString().slice(0, 10);
+  const ate = new Date(ano, mes + 1, 0).toISOString().slice(0, 10);
+  const label = now.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+  return { de, ate, label, ano, mes };
+}
+
+const DASHBOARD_STATE = { offset: 0 };
+
 routes.dashboard = async () => {
+  const per = periodoDoMes(DASHBOARD_STATE.offset);
+  const qs = `?de=${per.de}&ate=${per.ate}`;
+
   const [resumo, estoque, vendas] = await Promise.all([
-    api('api/financeiro/resumo'),
+    api('api/financeiro/resumo' + qs),
     api('api/estoque'),
-    api('api/vendas?limit=10'),
+    api('api/vendas' + qs + '&limit=10'),
   ]);
 
   const v = resumo.vendas || { totais: {}, cmv: 0, lucro_bruto: 0, taxa_media_pct: 0, ticket_medio: 0, por_canal: [] };
   const t = v.totais || {};
+  const aReceber = resumo.a_receber_ml || { qtd: 0, total_liquido: 0, total_bruto: 0 };
+  const proximosRepasses = resumo.proximos_repasses || [];
 
   $('#content').innerHTML = `
-    <div class="page-header"><h2>Dashboard</h2></div>
+    <div class="page-header">
+      <h2>Dashboard</h2>
+      <div class="actions" style="display:flex;gap:.5rem;align-items:center">
+        <button id="btnPrevMes" class="btn-secondary">‹</button>
+        <span style="min-width:180px;text-align:center;font-weight:600;text-transform:capitalize">${per.label}</span>
+        <button id="btnNextMes" class="btn-secondary" ${DASHBOARD_STATE.offset >= 0 ? 'disabled' : ''}>›</button>
+        <button id="btnMesAtual" class="btn-secondary" style="margin-left:.5rem">Mes atual</button>
+      </div>
+    </div>
 
-    <h3 class="mb-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Vendas do mes (${resumo.periodo.de} a ${resumo.periodo.ate})</h3>
+    <h3 class="mb-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">A receber do Mercado Livre</h3>
+    <div class="kpi-grid">
+      <div class="kpi ${aReceber.total_liquido > 0 ? 'ok' : ''}">
+        <div class="kpi-label">Total a receber (liquido)</div>
+        <div class="kpi-value">${money(aReceber.total_liquido)}</div>
+        <div class="kpi-sub">${aReceber.qtd} venda${aReceber.qtd === 1 ? '' : 's'} paga${aReceber.qtd === 1 ? '' : 's'} · bruto ${money(aReceber.total_bruto)}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Proximos repasses</div>
+        <div class="kpi-value">${proximosRepasses.length}</div>
+        <div class="kpi-sub">${proximosRepasses.length ? 'primeira liberacao: ' + fmtDate(proximosRepasses[0].data) : 'sem repasses previstos'}</div>
+      </div>
+    </div>
+
+    <h3 class="mb-1 mt-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Vendas do mes (${per.de} a ${per.ate})</h3>
     <div class="kpi-grid">
       <div class="kpi">
         <div class="kpi-label">Receita bruta</div>
@@ -136,23 +176,30 @@ routes.dashboard = async () => {
     </div>
 
     <div class="card mt-1">
-      <h3>Ultimas vendas</h3>
+      <h3>Vendas do mes (${vendas.length})</h3>
       <table>
-        <thead><tr><th>Data</th><th>Canal</th><th>Comprador</th><th>Status</th><th class="text-right">Valor</th></tr></thead>
+        <thead><tr><th>Data</th><th>Canal</th><th>Comprador</th><th>Status</th><th class="text-right">Valor</th><th class="text-right">Repasse</th></tr></thead>
         <tbody>
-          ${vendas.map(v => `
+          ${vendas.map(vd => `
             <tr>
-              <td>${fmtDate(v.data_venda)}</td>
-              <td><span class="badge ${badgeCanal(v.canal)}">${labelCanal(v.canal)}</span></td>
-              <td>${v.comprador_nome || '-'}</td>
-              <td>${v.status}</td>
-              <td class="text-right value-money">${money(v.valor_total)}</td>
+              <td>${fmtDate(vd.data_venda)}</td>
+              <td><span class="badge ${badgeCanal(vd.canal)}">${labelCanal(vd.canal)}</span></td>
+              <td>${vd.comprador_nome || '-'}</td>
+              <td>${vd.status}</td>
+              <td class="text-right value-money">${money(vd.valor_total)}</td>
+              <td class="text-right text-muted text-small">${vd.data_repasse_previsto ? fmtDate(vd.data_repasse_previsto) : '-'}</td>
             </tr>
-          `).join('') || '<tr><td colspan="5" class="text-muted">Sem vendas no periodo.</td></tr>'}
+          `).join('') || '<tr><td colspan="6" class="text-muted">Sem vendas no periodo.</td></tr>'}
         </tbody>
       </table>
     </div>
   `;
+
+  $('#btnPrevMes').addEventListener('click', () => { DASHBOARD_STATE.offset--; routes.dashboard(); });
+  $('#btnNextMes').addEventListener('click', () => {
+    if (DASHBOARD_STATE.offset < 0) { DASHBOARD_STATE.offset++; routes.dashboard(); }
+  });
+  $('#btnMesAtual').addEventListener('click', () => { DASHBOARD_STATE.offset = 0; routes.dashboard(); });
 };
 
 function labelCanal(c) {

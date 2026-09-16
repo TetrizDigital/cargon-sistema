@@ -63,6 +63,34 @@ router.get('/resumo', (req, res) => {
   const taxa_media_pct = totais.receita_bruta > 0 ? (totais.taxas_ml / totais.receita_bruta) * 100 : 0;
   const ticket_medio = totais.qtd > 0 ? totais.receita_bruta / totais.qtd : 0;
 
+  // A receber do ML: vendas pagas com repasse futuro (data_repasse_previsto > hoje)
+  const aReceberMl = db.prepare(`
+    SELECT
+      COUNT(*) AS qtd,
+      COALESCE(SUM(valor_liquido), 0) AS total_liquido,
+      COALESCE(SUM(valor_total), 0) AS total_bruto
+    FROM vendas
+    WHERE canal = 'MERCADO_LIVRE'
+      AND status IN ('paid', 'shipped')
+      AND data_repasse_previsto IS NOT NULL
+      AND date(data_repasse_previsto) > date('now')
+  `).get();
+
+  // Proximos repasses agrupados por semana (pros proximos 45 dias)
+  const proximosRepasses = db.prepare(`
+    SELECT
+      date(data_repasse_previsto) AS data,
+      COUNT(*) AS qtd,
+      SUM(valor_liquido) AS valor
+    FROM vendas
+    WHERE canal = 'MERCADO_LIVRE'
+      AND status IN ('paid', 'shipped')
+      AND data_repasse_previsto IS NOT NULL
+      AND date(data_repasse_previsto) BETWEEN date('now') AND date('now', '+45 days')
+    GROUP BY date(data_repasse_previsto)
+    ORDER BY data
+  `).all();
+
   res.json({
     periodo: { de, ate },
     entradas: stats.entradas || 0,
@@ -80,6 +108,8 @@ router.get('/resumo', (req, res) => {
       taxa_media_pct,
       ticket_medio,
     },
+    a_receber_ml: aReceberMl,
+    proximos_repasses: proximosRepasses,
   });
 });
 
