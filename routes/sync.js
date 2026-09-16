@@ -40,4 +40,39 @@ router.post('/site', async (_req, res) => {
   }
 });
 
+// Recomputa taxas reais das vendas ML ja importadas
+// Busca /orders/{id} pra cada e atualiza mercadolibre_fee e shipping_cost_seller
+router.post('/recompute-ml', async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  const somenteFaltantes = req.query.todos !== '1';
+
+  const filtro = somenteFaltantes
+    ? "WHERE canal = 'MERCADO_LIVRE' AND (taxa_detalhes IS NULL OR taxa_detalhes = '')"
+    : "WHERE canal = 'MERCADO_LIVRE'";
+
+  const vendas = db.prepare(`
+    SELECT id, id_externo_pedido FROM vendas ${filtro} ORDER BY data_venda DESC LIMIT ?
+  `).all(limit);
+
+  let processadas = 0;
+  let erros = 0;
+  for (const v of vendas) {
+    try {
+      const order = await ml.apiGet(`/orders/${v.id_externo_pedido}`);
+      // usa a mesma logica do upsertVenda re-executando
+      await ml._upsertVendaFromOrder(order);
+      processadas++;
+    } catch (err) {
+      console.error('[recompute-ml] ' + v.id_externo_pedido + ':', err.message);
+      erros++;
+    }
+  }
+
+  db.prepare(`INSERT INTO sync_logs (canal, tipo, status, itens_processados, mensagem)
+              VALUES ('MERCADO_LIVRE', 'recompute', ?, ?, ?)`)
+    .run(erros === 0 ? 'ok' : 'parcial', processadas, `recompute ${processadas} de ${vendas.length} vendas${erros ? ' (' + erros + ' erros)' : ''}`);
+
+  res.json({ ok: true, processadas, erros, total_candidatas: vendas.length });
+});
+
 module.exports = router;

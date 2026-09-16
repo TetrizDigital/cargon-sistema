@@ -4,7 +4,7 @@ const { db } = require('../db');
 
 const router = express.Router();
 
-// Resumo do periodo (entradas, saidas, saldo)
+// Resumo do periodo (entradas, saidas, saldo, taxas ML, frete, lucro real)
 router.get('/resumo', (req, res) => {
   const de = req.query.de || new Date(new Date().setDate(1)).toISOString().slice(0, 10);
   const ate = req.query.ate || new Date().toISOString().slice(0, 10);
@@ -27,6 +27,42 @@ router.get('/resumo', (req, res) => {
     ORDER BY total DESC
   `).all(de, ate);
 
+  // Metricas de vendas ML/Site no periodo (independente de lancamento no caixa)
+  const vendasStats = db.prepare(`
+    SELECT
+      canal,
+      COUNT(*) AS qtd_vendas,
+      SUM(valor_total)                     AS receita_bruta,
+      SUM(mercadolibre_fee)                AS taxas_ml,
+      SUM(shipping_cost_seller)            AS frete_pago,
+      SUM(valor_liquido)                   AS receita_liquida
+    FROM vendas
+    WHERE date(data_venda) BETWEEN date(?) AND date(?)
+      AND status IN ('paid', 'shipped', 'delivered', 'pago', 'enviado', 'entregue')
+    GROUP BY canal
+  `).all(de, ate);
+
+  // CMV (custo dos produtos vendidos) — sum de custo_unitario * quantidade dos itens vendidos
+  const cmv = db.prepare(`
+    SELECT COALESCE(SUM(iv.custo_unitario * iv.quantidade), 0) AS total
+    FROM itens_venda iv
+    JOIN vendas v ON v.id = iv.venda_id
+    WHERE date(v.data_venda) BETWEEN date(?) AND date(?)
+      AND v.status IN ('paid', 'shipped', 'delivered', 'pago', 'enviado', 'entregue')
+  `).get(de, ate).total;
+
+  const totais = vendasStats.reduce((acc, r) => ({
+    qtd: acc.qtd + r.qtd_vendas,
+    receita_bruta: acc.receita_bruta + (r.receita_bruta || 0),
+    taxas_ml: acc.taxas_ml + (r.taxas_ml || 0),
+    frete_pago: acc.frete_pago + (r.frete_pago || 0),
+    receita_liquida: acc.receita_liquida + (r.receita_liquida || 0),
+  }), { qtd: 0, receita_bruta: 0, taxas_ml: 0, frete_pago: 0, receita_liquida: 0 });
+
+  const lucro_bruto = totais.receita_liquida - cmv;
+  const taxa_media_pct = totais.receita_bruta > 0 ? (totais.taxas_ml / totais.receita_bruta) * 100 : 0;
+  const ticket_medio = totais.qtd > 0 ? totais.receita_bruta / totais.qtd : 0;
+
   res.json({
     periodo: { de, ate },
     entradas: stats.entradas || 0,
@@ -36,6 +72,14 @@ router.get('/resumo', (req, res) => {
     saidas_previstas: stats.saidas_previstas || 0,
     saldo_previsto: (stats.entradas_previstas || 0) - (stats.saidas_previstas || 0),
     por_categoria: porCategoria,
+    vendas: {
+      por_canal: vendasStats,
+      totais,
+      cmv,
+      lucro_bruto,
+      taxa_media_pct,
+      ticket_medio,
+    },
   });
 });
 

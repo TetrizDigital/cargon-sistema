@@ -118,8 +118,12 @@ async function syncVendas() {
     });
 
     for (const o of (dados.results || [])) {
-      upsertVenda(o);
-      processados++;
+      try {
+        await upsertVenda(o);
+        processados++;
+      } catch (err) {
+        console.error('[ml] erro em order ' + o.id + ':', err.message);
+      }
     }
 
     db.prepare(`INSERT INTO sync_logs (canal, tipo, status, itens_processados, mensagem)
@@ -135,7 +139,7 @@ async function syncVendas() {
   }
 }
 
-function upsertVenda(o) {
+async function upsertVenda(o) {
   const idExt = String(o.id);
   const data = o.date_created;
   const status = o.status;
@@ -143,21 +147,79 @@ function upsertVenda(o) {
   const shipping = o.shipping || {};
   const buyer = o.buyer || {};
 
+  // Comissao ML real: soma marketplace_fee de todos os payments
+  const payments = Array.isArray(o.payments) ? o.payments : [];
+  let mercadolibre_fee = 0;
+  let payment_method = null;
+  for (const p of payments) {
+    const fee = Number(p.marketplace_fee || 0);
+    mercadolibre_fee += fee;
+    if (!payment_method && p.payment_method_id) payment_method = p.payment_method_id;
+  }
+  // fallback: se nao veio no payments, usa 15.5% aproximado
+  const usedFeeEstimate = mercadolibre_fee <= 0;
+  if (usedFeeEstimate) mercadolibre_fee = valor * 0.155;
+
+  // Frete pago pelo vendedor: busca no shipment se tiver id
+  let shipping_cost_seller = 0;
+  const shipping_id = shipping.id ? String(shipping.id) : null;
+  if (shipping_id) {
+    try {
+      const shp = await apiGet(`/shipments/${shipping_id}`);
+      // varios campos possiveis dependendo do modo do envio
+      shipping_cost_seller = Number(
+        shp.cost ||
+        shp.shipping_option?.cost ||
+        shp.base_cost ||
+        0
+      );
+    } catch (err) {
+      // shipment pode nao existir ainda (envio pendente)
+      console.warn('[ml][shipment ' + shipping_id + ']', err.message);
+    }
+  }
+
+  const valor_frete_comprador = shipping.cost || 0;
+  const valor_liquido = valor - mercadolibre_fee - shipping_cost_seller;
+  const taxa_detalhes = JSON.stringify({
+    payments: payments.map(p => ({
+      id: p.id,
+      transaction_amount: p.transaction_amount,
+      marketplace_fee: p.marketplace_fee,
+      status: p.status,
+      payment_method_id: p.payment_method_id,
+    })),
+    fee_estimada: usedFeeEstimate,
+  });
+
   const info = db.prepare(`
-    INSERT INTO vendas (canal, id_externo_pedido, data_venda, status, comprador_nome, comprador_email, valor_total, valor_frete, taxa_canal, valor_liquido, data_repasse_previsto)
-    VALUES ('MERCADO_LIVRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, date(?, '+30 days'))
+    INSERT INTO vendas (canal, id_externo_pedido, data_venda, status, comprador_nome, comprador_email, valor_total, valor_frete, taxa_canal, mercadolibre_fee, shipping_cost_seller, shipping_id, payment_method, taxa_detalhes, valor_liquido, data_repasse_previsto)
+    VALUES ('MERCADO_LIVRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, date(?, '+30 days'))
     ON CONFLICT(canal, id_externo_pedido) DO UPDATE SET
       status = excluded.status,
       valor_total = excluded.valor_total,
+      valor_frete = excluded.valor_frete,
+      taxa_canal = excluded.taxa_canal,
+      mercadolibre_fee = excluded.mercadolibre_fee,
+      shipping_cost_seller = excluded.shipping_cost_seller,
+      shipping_id = excluded.shipping_id,
+      payment_method = excluded.payment_method,
+      taxa_detalhes = excluded.taxa_detalhes,
+      valor_liquido = excluded.valor_liquido,
       atualizado_em = datetime('now')
   `).run(
     idExt, data, status,
     buyer.nickname || (buyer.first_name + ' ' + buyer.last_name).trim(),
     buyer.email || null,
     valor,
-    shipping.cost || 0,
-    valor * 0.155, // taxa ML aprox
-    valor * (1 - 0.155) - (shipping.cost || 0),
+    valor_frete_comprador,
+    mercadolibre_fee, // taxa_canal mantido = fee real (compat)
+    mercadolibre_fee,
+    shipping_cost_seller,
+    shipping_id,
+    payment_method,
+    taxa_detalhes,
+    valor_liquido,
     data,
   );
 
@@ -225,4 +287,11 @@ function upsertVenda(o) {
   }
 }
 
-module.exports = { buildAuthUrl, exchangeCodeForToken, syncVendas, apiGet, getAccessToken };
+module.exports = {
+  buildAuthUrl,
+  exchangeCodeForToken,
+  syncVendas,
+  apiGet,
+  getAccessToken,
+  _upsertVendaFromOrder: upsertVenda, // exportado pra recompute
+};

@@ -191,6 +191,20 @@ CREATE INDEX IF NOT EXISTS idx_sync_data ON sync_logs(criado_em);
 
 db.exec(SCHEMA);
 
+// -------- Migrations idempotentes (colunas adicionadas depois do schema inicial) --------
+function addColumn(table, col, defSql) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name);
+  if (!cols.includes(col)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${defSql}`);
+    console.log(`[db] migration: ${table}.${col} adicionada`);
+  }
+}
+addColumn('vendas', 'mercadolibre_fee',      'REAL NOT NULL DEFAULT 0');   // comissao ML real
+addColumn('vendas', 'shipping_cost_seller',  'REAL NOT NULL DEFAULT 0');   // frete pago pelo vendedor (nao estimado)
+addColumn('vendas', 'shipping_id',           'TEXT');                       // id do shipment ML
+addColumn('vendas', 'payment_method',        'TEXT');                       // pix, credit_card, etc
+addColumn('vendas', 'taxa_detalhes',         'TEXT');                       // JSON com detalhes brutos (fee_details, etc)
+
 function getSetting(key, defaultValue = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : defaultValue;

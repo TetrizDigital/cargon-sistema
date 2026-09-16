@@ -48,24 +48,62 @@ routes.dashboard = async () => {
     api('api/vendas?limit=10'),
   ]);
 
+  const v = resumo.vendas || { totais: {}, cmv: 0, lucro_bruto: 0, taxa_media_pct: 0, ticket_medio: 0, por_canal: [] };
+  const t = v.totais || {};
+
   $('#content').innerHTML = `
     <div class="page-header"><h2>Dashboard</h2></div>
+
+    <h3 class="mb-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Vendas do mes (${resumo.periodo.de} a ${resumo.periodo.ate})</h3>
+    <div class="kpi-grid">
+      <div class="kpi">
+        <div class="kpi-label">Receita bruta</div>
+        <div class="kpi-value">${money(t.receita_bruta)}</div>
+        <div class="kpi-sub">${t.qtd || 0} vendas · ticket ${money(v.ticket_medio)}</div>
+      </div>
+      <div class="kpi warn">
+        <div class="kpi-label">Taxas ML</div>
+        <div class="kpi-value">${money(t.taxas_ml)}</div>
+        <div class="kpi-sub">${v.taxa_media_pct.toFixed(1)}% da receita</div>
+      </div>
+      <div class="kpi warn">
+        <div class="kpi-label">Frete pago (vendedor)</div>
+        <div class="kpi-value">${money(t.frete_pago)}</div>
+        <div class="kpi-sub">custo real do envio</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">CMV (custo produto)</div>
+        <div class="kpi-value">${money(v.cmv)}</div>
+        <div class="kpi-sub">unidades vendidas × custo</div>
+      </div>
+      <div class="kpi ${v.lucro_bruto >= 0 ? 'ok' : 'warn'}">
+        <div class="kpi-label">LUCRO BRUTO</div>
+        <div class="kpi-value">${money(v.lucro_bruto)}</div>
+        <div class="kpi-sub">receita − taxas − frete − CMV</div>
+      </div>
+    </div>
+
+    <h3 class="mb-1 mt-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Fluxo de caixa</h3>
     <div class="kpi-grid">
       <div class="kpi ok">
-        <div class="kpi-label">Entradas do mes</div>
+        <div class="kpi-label">Entradas realizadas</div>
         <div class="kpi-value">${money(resumo.entradas)}</div>
         <div class="kpi-sub">previsto: ${money(resumo.entradas_previstas)}</div>
       </div>
       <div class="kpi warn">
-        <div class="kpi-label">Saidas do mes</div>
+        <div class="kpi-label">Saidas realizadas</div>
         <div class="kpi-value">${money(resumo.saidas)}</div>
         <div class="kpi-sub">previsto: ${money(resumo.saidas_previstas)}</div>
       </div>
       <div class="kpi ${resumo.saldo >= 0 ? 'ok' : 'warn'}">
-        <div class="kpi-label">Saldo do mes</div>
+        <div class="kpi-label">Saldo caixa</div>
         <div class="kpi-value">${money(resumo.saldo)}</div>
-        <div class="kpi-sub">projecao: ${money(resumo.saldo + resumo.saldo_previsto)}</div>
+        <div class="kpi-sub">projetado: ${money(resumo.saldo + resumo.saldo_previsto)}</div>
       </div>
+    </div>
+
+    <h3 class="mb-1 mt-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Estoque</h3>
+    <div class="kpi-grid">
       <div class="kpi">
         <div class="kpi-label">Estoque total</div>
         <div class="kpi-value">${estoque.resumo.total_pecas} <span style="font-size:0.9rem;color:var(--cinza-3)">pecas</span></div>
@@ -78,7 +116,26 @@ routes.dashboard = async () => {
       </div>
     </div>
 
-    <div class="card">
+    <div class="card mt-1">
+      <h3>Vendas por canal (mes)</h3>
+      <table>
+        <thead><tr><th>Canal</th><th class="text-right">Vendas</th><th class="text-right">Receita bruta</th><th class="text-right">Taxas ML</th><th class="text-right">Frete pago</th><th class="text-right">Liquido</th></tr></thead>
+        <tbody>
+          ${v.por_canal.map(c => `
+            <tr>
+              <td><span class="badge ${badgeCanal(c.canal)}">${labelCanal(c.canal)}</span></td>
+              <td class="text-right">${c.qtd_vendas}</td>
+              <td class="text-right value-money">${money(c.receita_bruta)}</td>
+              <td class="text-right value-money negativo">${money(c.taxas_ml)}</td>
+              <td class="text-right value-money negativo">${money(c.frete_pago)}</td>
+              <td class="text-right value-money positivo">${money(c.receita_liquida)}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="6" class="text-muted">Sem vendas.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card mt-1">
       <h3>Ultimas vendas</h3>
       <table>
         <thead><tr><th>Data</th><th>Canal</th><th>Comprador</th><th>Status</th><th class="text-right">Valor</th></tr></thead>
