@@ -88,7 +88,9 @@ function upsertVendaSite(p) {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(vendaId, produtoId, it.title, it.qty, it.unit_price, custo);
 
-    if (produtoId && (p.status === 'pago' || p.status === 'enviado' || p.status === 'entregue')) {
+    const dataCorte = require('../db').getSetting('estoque_data_corte', '');
+    const vendaDepoisDoCorte = !dataCorte || data >= dataCorte;
+    if (produtoId && vendaDepoisDoCorte && (p.status === 'pago' || p.status === 'enviado' || p.status === 'entregue')) {
       const existente = db.prepare(`
         SELECT id FROM movimentos_estoque
         WHERE produto_id = ? AND referencia_tipo = 'venda' AND referencia_id = ?

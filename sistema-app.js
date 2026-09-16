@@ -183,6 +183,18 @@ try {
   console.error('[sistema] falha no seed:', err.message);
 }
 
+// -------- reset baseline (1 unica vez, corrige duplicacao de baixa de estoque) --------
+if (getSetting('_reset_baseline_v1_aplicado') !== '1') {
+  try {
+    const { reset } = require('./scripts/reset-estoque');
+    reset();
+    setSetting('_reset_baseline_v1_aplicado', '1');
+    console.log('[sistema] reset_baseline_v1 aplicado');
+  } catch (err) {
+    console.error('[sistema] falha no reset_baseline:', err.message);
+  }
+}
+
 // -------- setup inicial de usuarios (idempotente) --------
 try {
   const bcrypt = require('bcryptjs');

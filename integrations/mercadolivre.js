@@ -185,8 +185,10 @@ function upsertVenda(o) {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(vendaId, produtoId, it.item.title, it.quantity, it.unit_price, custo);
 
-    // Baixa estoque (se venda paga e produto vinculado)
-    if (produtoId && (status === 'paid' || status === 'shipped' || status === 'delivered')) {
+    // Baixa estoque (se venda paga, produto vinculado e venda apos data de corte)
+    const dataCorte = require('../db').getSetting('estoque_data_corte', '');
+    const vendaDepoisDoCorte = !dataCorte || data >= dataCorte;
+    if (produtoId && vendaDepoisDoCorte && (status === 'paid' || status === 'shipped' || status === 'delivered')) {
       const existente = db.prepare(`
         SELECT id FROM movimentos_estoque
         WHERE produto_id = ? AND referencia_tipo = 'venda' AND referencia_id = ?
