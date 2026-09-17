@@ -58,10 +58,11 @@ routes.dashboard = async () => {
   const per = periodoDoMes(DASHBOARD_STATE.offset);
   const qs = `?de=${per.de}&ate=${per.ate}`;
 
-  const [resumo, estoque, vendas, saldoMp, adsResumo] = await Promise.all([
+  const [resumo, estoque, vendas, vendasMes, saldoMp, adsResumo] = await Promise.all([
     api('api/financeiro/resumo' + qs),
     api('api/estoque'),
     api('api/vendas' + qs + '&limit=10'),
+    api('api/vendas' + qs + '&limit=500'),
     api('api/mp/saldo').catch(() => ({ saldo: { disponivel_estimado: 0, a_liberar: 0, a_liberar_qtd: 0, total: 0 } })),
     api('api/ads/resumo' + qs).catch(() => ({ totais: { gasto_total: 0, clicks: 0, prints: 0, total_amount: 0, roas: 0 } })),
   ]);
@@ -85,135 +86,215 @@ routes.dashboard = async () => {
       </div>
     </div>
 
-    <h3 class="mb-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Dinheiro (Mercado Livre + Mercado Pago)</h3>
-    <div class="kpi-grid">
-      <div class="kpi ok">
-        <div class="kpi-label">Saldo MP disponivel</div>
-        <div class="kpi-value">${money(mpSaldo.disponivel_estimado)}</div>
-        <div class="kpi-sub">estimado</div>
+    <details class="accordion" open>
+      <summary>
+        <span>💰 Dinheiro a receber</span>
+        <span class="summary-info">Total: ${money(mpSaldo.total)} · MP disponivel ${money(mpSaldo.disponivel_estimado)}</span>
+      </summary>
+      <div class="accordion-body">
+        <div class="text-small text-muted mb-1">
+          Vendas do ML e Site sao pagas via Mercado Pago. O saldo MP <strong>ja inclui</strong> tudo do ML.
+          "A receber ML" abaixo e' informativo (dinheiro que ainda vai cair no MP conforme entregas concluidas).
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi ok">
+            <div class="kpi-label">Saldo MP disponivel</div>
+            <div class="kpi-value">${money(mpSaldo.disponivel_estimado)}</div>
+            <div class="kpi-sub">ja liberado (voce pode sacar)</div>
+          </div>
+          <div class="kpi warn">
+            <div class="kpi-label">MP a liberar</div>
+            <div class="kpi-value">${money(mpSaldo.a_liberar)}</div>
+            <div class="kpi-sub">${mpSaldo.a_liberar_qtd} pagamentos aguardando prazo</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Total no Mercado Pago</div>
+            <div class="kpi-value">${money(mpSaldo.total)}</div>
+            <div class="kpi-sub">disponivel + a liberar</div>
+          </div>
+        </div>
+        <div class="text-small text-muted mt-1">
+          <em>Info ML (nao somar):</em> ${aReceber.qtd} vendas pagas aguardando entrega, valor liquido estimado ${money(aReceber.total_liquido)} (bruto ${money(aReceber.total_bruto)})
+        </div>
       </div>
-      <div class="kpi warn">
-        <div class="kpi-label">MP a liberar</div>
-        <div class="kpi-value">${money(mpSaldo.a_liberar)}</div>
-        <div class="kpi-sub">aguardando prazo MP</div>
-      </div>
-      <div class="kpi ${aReceber.total_liquido > 0 ? 'ok' : ''}">
-        <div class="kpi-label">A receber ML (liquido)</div>
-        <div class="kpi-value">${money(aReceber.total_liquido)}</div>
-        <div class="kpi-sub">${aReceber.qtd} venda${aReceber.qtd === 1 ? '' : 's'} · bruto ${money(aReceber.total_bruto)}</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Total a receber</div>
-        <div class="kpi-value">${money(mpSaldo.total + aReceber.total_liquido)}</div>
-        <div class="kpi-sub">MP total + ML liquido</div>
-      </div>
-    </div>
+    </details>
 
-    <h3 class="mb-1 mt-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Vendas do mes (${per.de} a ${per.ate})</h3>
-    <div class="kpi-grid">
-      <div class="kpi">
-        <div class="kpi-label">Receita bruta</div>
-        <div class="kpi-value">${money(t.receita_bruta)}</div>
-        <div class="kpi-sub">${t.qtd || 0} vendas · ticket ${money(v.ticket_medio)}</div>
-      </div>
-      <div class="kpi warn">
-        <div class="kpi-label">Taxas ML</div>
-        <div class="kpi-value">${money(t.taxas_ml)}</div>
-        <div class="kpi-sub">${v.taxa_media_pct.toFixed(1)}% da receita</div>
-      </div>
-      <div class="kpi warn">
-        <div class="kpi-label">Frete pago (vendedor)</div>
-        <div class="kpi-value">${money(t.frete_pago)}</div>
-        <div class="kpi-sub">custo real do envio</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">CMV (custo produto)</div>
-        <div class="kpi-value">${money(v.cmv)}</div>
-        <div class="kpi-sub">unidades vendidas × custo</div>
-      </div>
-      <div class="kpi warn">
-        <div class="kpi-label">Gasto Mercado Ads</div>
-        <div class="kpi-value">${money(adsT.gasto_total)}</div>
-        <div class="kpi-sub">${adsT.clicks || 0} cliques · ROAS ${(adsT.roas || 0).toFixed(2)}x</div>
-      </div>
-      <div class="kpi ${lucroReal >= 0 ? 'ok' : 'warn'}">
-        <div class="kpi-label">LUCRO REAL (apos Ads)</div>
-        <div class="kpi-value">${money(lucroReal)}</div>
-        <div class="kpi-sub">bruto − ads = lucro liquido</div>
-      </div>
-    </div>
+    <details class="accordion" open>
+      <summary>
+        <span>📈 Vendas do mes (${per.label})</span>
+        <span class="summary-info">${t.qtd || 0} vendas · ${money(t.receita_bruta)} receita · lucro ${money(lucroReal)}</span>
+      </summary>
+      <div class="accordion-body">
+        <div class="chart-wrap mb-1"><canvas id="chartVendasDia"></canvas></div>
+        <div class="kpi-grid">
+          <div class="kpi">
+            <div class="kpi-label">Receita bruta</div>
+            <div class="kpi-value">${money(t.receita_bruta)}</div>
+            <div class="kpi-sub">${t.qtd || 0} vendas · ticket ${money(v.ticket_medio)}</div>
+          </div>
+          <div class="kpi warn">
+            <div class="kpi-label">Taxas ML</div>
+            <div class="kpi-value">${money(t.taxas_ml)}</div>
+            <div class="kpi-sub">${v.taxa_media_pct.toFixed(1)}% da receita</div>
+          </div>
+          <div class="kpi warn">
+            <div class="kpi-label">Frete pago (vendedor)</div>
+            <div class="kpi-value">${money(t.frete_pago)}</div>
+            <div class="kpi-sub">custo real do envio</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">CMV (custo produto)</div>
+            <div class="kpi-value">${money(v.cmv)}</div>
+            <div class="kpi-sub">unidades vendidas × custo</div>
+          </div>
+          <div class="kpi warn">
+            <div class="kpi-label">Gasto Mercado Ads</div>
+            <div class="kpi-value">${money(adsT.gasto_total)}</div>
+            <div class="kpi-sub">${adsT.clicks || 0} cliques · ROAS ${(adsT.roas || 0).toFixed(2)}x</div>
+          </div>
+          <div class="kpi ${lucroReal >= 0 ? 'ok' : 'warn'}">
+            <div class="kpi-label">LUCRO REAL (apos Ads)</div>
+            <div class="kpi-value">${money(lucroReal)}</div>
+            <div class="kpi-sub">bruto − ads = lucro liquido</div>
+          </div>
+        </div>
 
-    <h3 class="mb-1 mt-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Fluxo de caixa</h3>
-    <div class="kpi-grid">
-      <div class="kpi ok">
-        <div class="kpi-label">Entradas realizadas</div>
-        <div class="kpi-value">${money(resumo.entradas)}</div>
-        <div class="kpi-sub">previsto: ${money(resumo.entradas_previstas)}</div>
-      </div>
-      <div class="kpi warn">
-        <div class="kpi-label">Saidas realizadas</div>
-        <div class="kpi-value">${money(resumo.saidas)}</div>
-        <div class="kpi-sub">previsto: ${money(resumo.saidas_previstas)}</div>
-      </div>
-      <div class="kpi ${resumo.saldo >= 0 ? 'ok' : 'warn'}">
-        <div class="kpi-label">Saldo caixa</div>
-        <div class="kpi-value">${money(resumo.saldo)}</div>
-        <div class="kpi-sub">projetado: ${money(resumo.saldo + resumo.saldo_previsto)}</div>
-      </div>
-    </div>
+        <h4 class="mt-1 mb-1">Vendas por canal</h4>
+        <table>
+          <thead><tr><th>Canal</th><th class="text-right">Vendas</th><th class="text-right">Receita bruta</th><th class="text-right">Taxas ML</th><th class="text-right">Frete pago</th><th class="text-right">Liquido</th></tr></thead>
+          <tbody>
+            ${v.por_canal.map(c => `
+              <tr>
+                <td><span class="badge ${badgeCanal(c.canal)}">${labelCanal(c.canal)}</span></td>
+                <td class="text-right">${c.qtd_vendas}</td>
+                <td class="text-right value-money">${money(c.receita_bruta)}</td>
+                <td class="text-right value-money negativo">${money(c.taxas_ml)}</td>
+                <td class="text-right value-money negativo">${money(c.frete_pago)}</td>
+                <td class="text-right value-money positivo">${money(c.receita_liquida)}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-muted">Sem vendas.</td></tr>'}
+          </tbody>
+        </table>
 
-    <h3 class="mb-1 mt-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Estoque</h3>
-    <div class="kpi-grid">
-      <div class="kpi">
-        <div class="kpi-label">Estoque total</div>
-        <div class="kpi-value">${estoque.resumo.total_pecas} <span style="font-size:0.9rem;color:var(--cinza-3)">pecas</span></div>
-        <div class="kpi-sub">valor: ${money(estoque.resumo.valor_total)}</div>
+        <h4 class="mt-1 mb-1">Ultimas vendas</h4>
+        <table>
+          <thead><tr><th>Data</th><th>Canal</th><th>Comprador</th><th>Status</th><th class="text-right">Valor</th><th class="text-right">Repasse</th></tr></thead>
+          <tbody>
+            ${vendas.map(vd => `
+              <tr>
+                <td>${fmtDate(vd.data_venda)}</td>
+                <td><span class="badge ${badgeCanal(vd.canal)}">${labelCanal(vd.canal)}</span></td>
+                <td>${vd.comprador_nome || '-'}</td>
+                <td>${vd.status}</td>
+                <td class="text-right value-money">${money(vd.valor_total)}</td>
+                <td class="text-right text-muted text-small">${vd.data_repasse_previsto ? fmtDate(vd.data_repasse_previsto) : '-'}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-muted">Sem vendas.</td></tr>'}
+          </tbody>
+        </table>
       </div>
-      <div class="kpi ${estoque.resumo.criticos > 0 ? 'warn' : ''}">
-        <div class="kpi-label">Alertas de estoque</div>
-        <div class="kpi-value">${estoque.resumo.criticos + estoque.resumo.atencao}</div>
-        <div class="kpi-sub">${estoque.resumo.criticos} criticos, ${estoque.resumo.atencao} em atencao</div>
+    </details>
+
+    <details class="accordion">
+      <summary>
+        <span>💸 Fluxo de caixa</span>
+        <span class="summary-info">Saldo ${money(resumo.saldo)} · previsto ${money(resumo.saldo + resumo.saldo_previsto)}</span>
+      </summary>
+      <div class="accordion-body">
+        <div class="kpi-grid">
+          <div class="kpi ok">
+            <div class="kpi-label">Entradas realizadas</div>
+            <div class="kpi-value">${money(resumo.entradas)}</div>
+            <div class="kpi-sub">previsto: ${money(resumo.entradas_previstas)}</div>
+          </div>
+          <div class="kpi warn">
+            <div class="kpi-label">Saidas realizadas</div>
+            <div class="kpi-value">${money(resumo.saidas)}</div>
+            <div class="kpi-sub">previsto: ${money(resumo.saidas_previstas)}</div>
+          </div>
+          <div class="kpi ${resumo.saldo >= 0 ? 'ok' : 'warn'}">
+            <div class="kpi-label">Saldo caixa</div>
+            <div class="kpi-value">${money(resumo.saldo)}</div>
+            <div class="kpi-sub">projetado: ${money(resumo.saldo + resumo.saldo_previsto)}</div>
+          </div>
+        </div>
       </div>
-    </div>
+    </details>
 
-    <div class="card mt-1">
-      <h3>Vendas por canal (mes)</h3>
-      <table>
-        <thead><tr><th>Canal</th><th class="text-right">Vendas</th><th class="text-right">Receita bruta</th><th class="text-right">Taxas ML</th><th class="text-right">Frete pago</th><th class="text-right">Liquido</th></tr></thead>
-        <tbody>
-          ${v.por_canal.map(c => `
-            <tr>
-              <td><span class="badge ${badgeCanal(c.canal)}">${labelCanal(c.canal)}</span></td>
-              <td class="text-right">${c.qtd_vendas}</td>
-              <td class="text-right value-money">${money(c.receita_bruta)}</td>
-              <td class="text-right value-money negativo">${money(c.taxas_ml)}</td>
-              <td class="text-right value-money negativo">${money(c.frete_pago)}</td>
-              <td class="text-right value-money positivo">${money(c.receita_liquida)}</td>
-            </tr>
-          `).join('') || '<tr><td colspan="6" class="text-muted">Sem vendas.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="card mt-1">
-      <h3>Vendas do mes (${vendas.length})</h3>
-      <table>
-        <thead><tr><th>Data</th><th>Canal</th><th>Comprador</th><th>Status</th><th class="text-right">Valor</th><th class="text-right">Repasse</th></tr></thead>
-        <tbody>
-          ${vendas.map(vd => `
-            <tr>
-              <td>${fmtDate(vd.data_venda)}</td>
-              <td><span class="badge ${badgeCanal(vd.canal)}">${labelCanal(vd.canal)}</span></td>
-              <td>${vd.comprador_nome || '-'}</td>
-              <td>${vd.status}</td>
-              <td class="text-right value-money">${money(vd.valor_total)}</td>
-              <td class="text-right text-muted text-small">${vd.data_repasse_previsto ? fmtDate(vd.data_repasse_previsto) : '-'}</td>
-            </tr>
-          `).join('') || '<tr><td colspan="6" class="text-muted">Sem vendas no periodo.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
+    <details class="accordion">
+      <summary>
+        <span>📦 Estoque</span>
+        <span class="summary-info">${estoque.resumo.total_pecas} pecas · ${money(estoque.resumo.valor_total)} · ${estoque.resumo.criticos + estoque.resumo.atencao} alertas</span>
+      </summary>
+      <div class="accordion-body">
+        <div class="kpi-grid">
+          <div class="kpi">
+            <div class="kpi-label">Estoque total</div>
+            <div class="kpi-value">${estoque.resumo.total_pecas} <span style="font-size:0.9rem;color:var(--cinza-3)">pecas</span></div>
+            <div class="kpi-sub">valor: ${money(estoque.resumo.valor_total)}</div>
+          </div>
+          <div class="kpi ${estoque.resumo.criticos > 0 ? 'warn' : ''}">
+            <div class="kpi-label">Alertas de estoque</div>
+            <div class="kpi-value">${estoque.resumo.criticos + estoque.resumo.atencao}</div>
+            <div class="kpi-sub">${estoque.resumo.criticos} criticos, ${estoque.resumo.atencao} em atencao</div>
+          </div>
+        </div>
+      </div>
+    </details>
   `;
+
+  // Grafico de vendas por dia do mes
+  const porDia = {};
+  const startDate = new Date(per.de);
+  const endDate = new Date(per.ate);
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    porDia[d.toISOString().slice(0, 10)] = { ml: 0, site: 0 };
+  }
+  for (const vd of vendasMes) {
+    const d = String(vd.data_venda).slice(0, 10);
+    if (!porDia[d]) porDia[d] = { ml: 0, site: 0 };
+    if (['cancelled', 'refunded', 'cancelado', 'reembolsado'].includes(vd.status)) continue;
+    if (vd.canal === 'MERCADO_LIVRE') porDia[d].ml += vd.valor_total;
+    else if (vd.canal === 'SITE_PROPRIO') porDia[d].site += vd.valor_total;
+  }
+  const labels = Object.keys(porDia).sort();
+  const dataML = labels.map(l => porDia[l].ml);
+  const dataSite = labels.map(l => porDia[l].site);
+
+  const ctx = document.getElementById('chartVendasDia');
+  if (ctx && typeof Chart !== 'undefined') {
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels.map(l => l.slice(8, 10) + '/' + l.slice(5, 7)),
+        datasets: [
+          { label: 'Mercado Livre', data: dataML, backgroundColor: '#FFA500', stack: 's' },
+          { label: 'Site Cargon', data: dataSite, backgroundColor: '#3b82f6', stack: 's' },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: {
+              label: (c) => c.dataset.label + ': ' + Number(c.raw).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+            },
+          },
+        },
+        scales: {
+          x: { stacked: true },
+          y: {
+            stacked: true,
+            ticks: {
+              callback: (v) => 'R$ ' + Number(v).toLocaleString('pt-BR'),
+            },
+          },
+        },
+      },
+    });
+  }
 
   $('#btnPrevMes').addEventListener('click', () => { DASHBOARD_STATE.offset--; routes.dashboard(); });
   $('#btnNextMes').addEventListener('click', () => {
