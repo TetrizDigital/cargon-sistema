@@ -159,4 +159,73 @@ function hoje() {
   return new Date().toISOString().slice(0, 10);
 }
 
-module.exports = { syncCampanhas, getAdvertiserId, adsGet };
+// Sincroniza metricas POR ANUNCIO (MLB) - resposta com thumbnail e permalink
+async function syncItems(dateFrom, dateTo) {
+  const inicio = Date.now();
+  const advId = await getAdvertiserId();
+  const de = dateFrom || primeiroDiaDoMes();
+  const ate = dateTo || hoje();
+
+  let processados = 0;
+  try {
+    let offset = 0;
+    const limit = 50;
+    while (true) {
+      const data = await adsGet(`/marketplace/advertising/MLB/advertisers/${advId}/product_ads/ads/search`, {
+        limit, offset,
+        date_from: de,
+        date_to: ate,
+        metrics: 'clicks,prints,cost,cpc,ctr,acos,direct_amount,indirect_amount,total_amount',
+      });
+      const results = data.results || [];
+      if (results.length === 0) break;
+
+      for (const a of results) {
+        upsertAdItem(a, de, ate);
+        processados++;
+      }
+      offset += results.length;
+      const total = data.paging?.total || results.length;
+      if (offset >= total) break;
+      if (offset > 1000) break;
+    }
+
+    dbLocal.prepare(`INSERT INTO sync_logs (canal, tipo, status, itens_processados, mensagem)
+                     VALUES ('MERCADO_ADS', 'items', 'ok', ?, ?)`)
+      .run(processados, `periodo ${de} a ${ate}`);
+    return { ok: true, processados, ms: Date.now() - inicio, periodo: { de, ate } };
+  } catch (err) {
+    dbLocal.prepare(`INSERT INTO sync_logs (canal, tipo, status, mensagem)
+                     VALUES ('MERCADO_ADS', 'items', 'erro', ?)`)
+      .run(err.message);
+    throw err;
+  }
+}
+
+function upsertAdItem(a, de, ate) {
+  const m = a.metrics || {};
+  dbLocal.prepare(`
+    INSERT INTO ads_items (item_id, periodo_de, periodo_ate, title, price, status, thumbnail, permalink, campaign_id, ad_group_id, clicks, prints, cost, cpc, ctr, acos, direct_amount, indirect_amount, total_amount, atualizado_em)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(item_id, periodo_de, periodo_ate) DO UPDATE SET
+      title = excluded.title, price = excluded.price, status = excluded.status,
+      thumbnail = excluded.thumbnail, permalink = excluded.permalink,
+      campaign_id = excluded.campaign_id, ad_group_id = excluded.ad_group_id,
+      clicks = excluded.clicks, prints = excluded.prints, cost = excluded.cost,
+      cpc = excluded.cpc, ctr = excluded.ctr, acos = excluded.acos,
+      direct_amount = excluded.direct_amount, indirect_amount = excluded.indirect_amount,
+      total_amount = excluded.total_amount,
+      atualizado_em = datetime('now')
+  `).run(
+    a.item_id, de, ate,
+    a.title, a.price, a.status,
+    a.thumbnail, a.permalink,
+    a.campaign_id ? String(a.campaign_id) : null,
+    a.ad_group_id ? String(a.ad_group_id) : null,
+    m.clicks || 0, m.prints || 0, m.cost || 0,
+    m.cpc || 0, m.ctr || 0, m.acos || 0,
+    m.direct_amount || 0, m.indirect_amount || 0, m.total_amount || 0,
+  );
+}
+
+module.exports = { syncCampanhas, syncItems, getAdvertiserId, adsGet };

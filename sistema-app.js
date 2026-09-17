@@ -193,7 +193,10 @@ if (process.env.SYNC_ENABLED === 'true' && !global.__sistema_cron_started) {
   // Ads sync: uma vez por hora (dados sao pesados pra puxar; nao muda de minuto em minuto)
   const ADS_INTERVAL_MS = 60 * 60 * 1000;
   setTimeout(() => {
-    setInterval(() => { ads.syncCampanhas().catch(e => console.error('[sistema][cron ads]', e.message)); }, ADS_INTERVAL_MS);
+    setInterval(() => {
+      ads.syncCampanhas().catch(e => console.error('[sistema][cron ads camp]', e.message));
+      ads.syncItems().catch(e => console.error('[sistema][cron ads items]', e.message));
+    }, ADS_INTERVAL_MS);
   }, 5 * 60 * 1000);
 
   console.log('[sistema] jobs de sync agendados (setInterval)');

@@ -321,6 +321,33 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_ads_camp_status ON ads_campanhas(status);
   CREATE INDEX IF NOT EXISTS idx_ads_metricas_periodo ON ads_metricas(periodo_de, periodo_ate);
+
+  CREATE TABLE IF NOT EXISTS ads_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    periodo_de TEXT NOT NULL,
+    periodo_ate TEXT NOT NULL,
+    title TEXT,
+    price REAL,
+    status TEXT,
+    thumbnail TEXT,
+    permalink TEXT,
+    campaign_id TEXT,
+    ad_group_id TEXT,
+    clicks INTEGER DEFAULT 0,
+    prints INTEGER DEFAULT 0,
+    cost REAL DEFAULT 0,
+    cpc REAL DEFAULT 0,
+    ctr REAL DEFAULT 0,
+    acos REAL DEFAULT 0,
+    direct_amount REAL DEFAULT 0,
+    indirect_amount REAL DEFAULT 0,
+    total_amount REAL DEFAULT 0,
+    atualizado_em TEXT DEFAULT (datetime('now')),
+    UNIQUE(item_id, periodo_de, periodo_ate)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ads_items_item ON ads_items(item_id);
+  CREATE INDEX IF NOT EXISTS idx_ads_items_periodo ON ads_items(periodo_de, periodo_ate);
 `);
 
 // -------- Tabela de movimentos Mercado Pago --------

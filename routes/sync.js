@@ -53,8 +53,11 @@ router.post('/mercadopago', async (_req, res) => {
 router.post('/mercadoads', async (req, res) => {
   try {
     const ads = require('../integrations/mercadoads');
-    const r = await ads.syncCampanhas(req.query.de, req.query.ate);
-    res.json(r);
+    const [c, i] = await Promise.all([
+      ads.syncCampanhas(req.query.de, req.query.ate),
+      ads.syncItems(req.query.de, req.query.ate),
+    ]);
+    res.json({ campanhas: c, items: i });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

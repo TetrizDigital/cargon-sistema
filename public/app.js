@@ -615,15 +615,16 @@ routes.sync = async () => {
   });
 };
 
-// ============ MERCADO ADS ============
+// ============ MERCADO ADS (POR ANUNCIO) ============
 routes.ads = async () => {
   const per = periodoDoMes(DASHBOARD_STATE.offset);
-  const data = await api(`api/ads/resumo?de=${per.de}&ate=${per.ate}`);
+  const data = await api(`api/ads/items?de=${per.de}&ate=${per.ate}`);
   const t = data.totais || {};
+  const items = data.items || [];
 
   $('#content').innerHTML = `
     <div class="page-header">
-      <h2>Mercado Ads (${per.label})</h2>
+      <h2>Mercado Ads por anuncio (${per.label})</h2>
       <div class="actions">
         <button id="btnSyncAds" class="btn-primary">Sync agora</button>
       </div>
@@ -632,55 +633,65 @@ routes.ads = async () => {
     <div class="kpi-grid">
       <div class="kpi warn">
         <div class="kpi-label">Gasto total no mes</div>
-        <div class="kpi-value">${money(t.gasto_total)}</div>
-        <div class="kpi-sub">${t.total_campanhas || 0} campanha${t.total_campanhas === 1 ? '' : 's'}</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Impressoes / Cliques</div>
-        <div class="kpi-value">${(t.prints || 0).toLocaleString('pt-BR')}</div>
-        <div class="kpi-sub">${(t.clicks || 0).toLocaleString('pt-BR')} cliques · CTR ${(t.ctr_medio || 0).toFixed(2)}%</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">CPC medio</div>
-        <div class="kpi-value">${money(t.cpc_medio)}</div>
-        <div class="kpi-sub">custo por clique</div>
+        <div class="kpi-value">${money(t.gasto)}</div>
+        <div class="kpi-sub">${t.qtd || 0} anuncios ativos</div>
       </div>
       <div class="kpi ok">
-        <div class="kpi-label">Vendas geradas (Ads)</div>
+        <div class="kpi-label">Vendas geradas</div>
         <div class="kpi-value">${money(t.total_amount)}</div>
         <div class="kpi-sub">direto: ${money(t.direct_amount)}</div>
       </div>
       <div class="kpi ${(t.roas || 0) >= 4 ? 'ok' : 'warn'}">
-        <div class="kpi-label">ROAS</div>
+        <div class="kpi-label">ROAS medio</div>
         <div class="kpi-value">${(t.roas || 0).toFixed(2)}x</div>
         <div class="kpi-sub">ACOS ${(t.acos_geral || 0).toFixed(1)}%</div>
       </div>
     </div>
 
     <div class="card mt-1">
-      <h3>Campanhas (${(data.campanhas || []).length})</h3>
+      <h3>Anuncios (${items.length}) — ordenado por maior gasto</h3>
+      <div class="text-small text-muted mb-1">
+        Clique no titulo do anuncio para abrir no Mercado Livre.
+      </div>
       <table>
         <thead>
           <tr>
-            <th>Nome</th><th>Status</th><th class="text-right">Diario</th>
-            <th class="text-right">Cost</th><th class="text-right">Cliques</th><th class="text-right">CPC</th>
-            <th class="text-right">CTR</th><th class="text-right">Vendas</th><th class="text-right">ROAS</th>
+            <th></th>
+            <th>Anuncio</th>
+            <th>SKU</th>
+            <th>Campanha</th>
+            <th class="text-right">Gasto</th>
+            <th class="text-right">Cliques</th>
+            <th class="text-right">Impressoes</th>
+            <th class="text-right">CPC</th>
+            <th class="text-right">CTR</th>
+            <th class="text-right">Vendas</th>
+            <th class="text-right">ROAS</th>
           </tr>
         </thead>
         <tbody>
-          ${(data.campanhas || []).map(c => `
+          ${items.map(it => {
+            const roas = it.cost > 0 ? (it.total_amount || 0) / it.cost : 0;
+            const roasClass = roas >= 4 ? 'positivo' : roas > 0 ? '' : 'negativo';
+            return `
             <tr>
-              <td>${c.nome || '(sem nome)'}</td>
-              <td><span class="badge ${c.status === 'active' ? 'ok' : 'warn'}">${c.status || '-'}</span></td>
-              <td class="text-right">${money(c.daily_budget)}</td>
-              <td class="text-right value-money negativo">${money(c.cost)}</td>
-              <td class="text-right">${c.clicks || 0}</td>
-              <td class="text-right">${money(c.cpc)}</td>
-              <td class="text-right">${(c.ctr || 0).toFixed(2)}%</td>
-              <td class="text-right value-money positivo">${money(c.total_amount)}</td>
-              <td class="text-right">${c.cost > 0 ? ((c.total_amount || 0) / c.cost).toFixed(2) + 'x' : '-'}</td>
+              <td>${it.thumbnail ? `<img src="${it.thumbnail}" style="width:40px;height:40px;border-radius:4px;object-fit:cover" />` : ''}</td>
+              <td>
+                ${it.permalink ? `<a href="${it.permalink}" target="_blank" style="color:var(--texto);text-decoration:none">${(it.title || '').substring(0,60)}${(it.title || '').length > 60 ? '…' : ''}</a>` : (it.title || '')}
+                <div class="text-small text-muted"><code>${it.item_id}</code></div>
+              </td>
+              <td>${it.sku ? `<code>${it.sku}</code>` : '<span class="text-muted">-</span>'}</td>
+              <td class="text-small">${it.campanha_nome || '-'}</td>
+              <td class="text-right value-money negativo">${money(it.cost)}</td>
+              <td class="text-right">${it.clicks || 0}</td>
+              <td class="text-right text-muted">${(it.prints || 0).toLocaleString('pt-BR')}</td>
+              <td class="text-right">${money(it.cpc)}</td>
+              <td class="text-right">${(it.ctr || 0).toFixed(2)}%</td>
+              <td class="text-right value-money positivo">${money(it.total_amount)}</td>
+              <td class="text-right value-money ${roasClass}">${it.cost > 0 ? roas.toFixed(2) + 'x' : '-'}</td>
             </tr>
-          `).join('') || '<tr><td colspan="9" class="text-muted">Nenhuma campanha ainda. Roda Sync agora.</td></tr>'}
+            `;
+          }).join('') || '<tr><td colspan="11" class="text-muted">Nenhum anuncio com metricas ainda. Roda Sync agora.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -689,7 +700,7 @@ routes.ads = async () => {
   $('#btnSyncAds').addEventListener('click', async () => {
     try {
       const r = await api(`api/sync/mercadoads?de=${per.de}&ate=${per.ate}`, { method: 'POST' });
-      alert(`Ads: ${r.processados} campanhas atualizadas`);
+      alert(`Ads sincronizados: ${r.campanhas?.processados || 0} campanhas + ${r.items?.processados || 0} anuncios`);
       routes.ads();
     } catch (err) { alert('Erro: ' + err.message); }
   });
