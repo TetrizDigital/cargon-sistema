@@ -139,12 +139,23 @@ app.get('/', (req, res) => {
   if (req.session.userId) return res.redirect(req.baseUrl + '/app.html');
   res.redirect(req.baseUrl + '/login');
 });
-app.get('/login', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
-app.get('/app.html', requireAuth, (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'app.html'));
-});
+function serveHtmlComCacheBuster(nome) {
+  return (req, res) => {
+    const filePath = path.join(__dirname, 'public', nome);
+    try {
+      const stat = fs.statSync(filePath);
+      const buster = String(Math.floor(stat.mtimeMs));
+      const html = fs.readFileSync(filePath, 'utf8').replace(/__CACHE_BUSTER__/g, buster);
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(html);
+    } catch (err) {
+      res.status(500).send('erro carregando pagina');
+    }
+  };
+}
+app.get('/login', serveHtmlComCacheBuster('login.html'));
+app.get('/app.html', requireAuth, serveHtmlComCacheBuster('app.html'));
 
 app.use(express.static(path.join(__dirname, 'public'), {
   index: false,
