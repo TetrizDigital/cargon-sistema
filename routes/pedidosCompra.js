@@ -348,4 +348,33 @@ router.post('/:id/cancelar', (req, res) => {
   res.json({ ok: true });
 });
 
+// Admin: consolida dois pedidos em um (move itens do "outroId" pro "id", deleta o outroId, reabre)
+router.post('/:id/admin/consolidar/:outroId', (req, res) => {
+  const id = Number(req.params.id);
+  const outroId = Number(req.params.outroId);
+  if (id === outroId) return res.status(400).json({ error: 'ids iguais' });
+
+  const base = db.prepare('SELECT * FROM pedidos_compra WHERE id = ?').get(id);
+  const outro = db.prepare('SELECT * FROM pedidos_compra WHERE id = ?').get(outroId);
+  if (!base || !outro) return res.status(404).json({ error: 'pedido nao encontrado' });
+
+  const { novo_status = 'aberto', nova_observacao } = req.body || {};
+
+  const trans = db.transaction(() => {
+    // Move itens
+    db.prepare('UPDATE pedidos_compra_itens SET pedido_id = ? WHERE pedido_id = ?').run(id, outroId);
+    // Deleta o outro
+    db.prepare('DELETE FROM pedidos_compra WHERE id = ?').run(outroId);
+    // Recalcula total do base
+    const total = db.prepare('SELECT COALESCE(SUM(quantidade * custo_unitario), 0) AS t FROM pedidos_compra_itens WHERE pedido_id = ?').get(id).t;
+    db.prepare(`
+      UPDATE pedidos_compra
+      SET valor_total = ?, status = ?, data_recebimento = NULL, coletado_por = NULL, coletado_por_nome = NULL, custo_coleta = 0, recebido_em = NULL, observacao = COALESCE(?, observacao)
+      WHERE id = ?
+    `).run(total, novo_status, nova_observacao, id);
+  });
+  trans();
+  res.json({ ok: true });
+});
+
 module.exports = router;
