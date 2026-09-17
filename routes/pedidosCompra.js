@@ -61,7 +61,26 @@ router.get('/:id', (req, res) => {
     JOIN produtos p ON p.id = pci.produto_id
     WHERE pci.pedido_id = ?
   `).all(id);
-  res.json({ ...pedido, itens });
+
+  // Retiradas historicas
+  const retiradas = db.prepare(`
+    SELECT r.*, u.name AS criado_por_nome
+    FROM pedidos_compra_retiradas r
+    LEFT JOIN users u ON u.id = r.criado_por
+    WHERE r.pedido_id = ?
+    ORDER BY r.data_retirada, r.id
+  `).all(id);
+  for (const r of retiradas) {
+    r.itens = db.prepare(`
+      SELECT ri.*, pci.produto_id, p.sku, p.nome AS produto_nome
+      FROM pedidos_compra_retiradas_itens ri
+      JOIN pedidos_compra_itens pci ON pci.id = ri.item_id
+      JOIN produtos p ON p.id = pci.produto_id
+      WHERE ri.retirada_id = ?
+    `).all(r.id);
+  }
+
+  res.json({ ...pedido, itens, retiradas });
 });
 
 router.post('/', (req, res) => {
@@ -363,6 +382,159 @@ router.patch('/:id/itens/:itemId/ja-recebida', (req, res) => {
   if (qtd_ja_recebida > it.quantidade) return res.status(400).json({ error: 'nao pode ser maior que a quantidade' });
 
   db.prepare('UPDATE pedidos_compra_itens SET qtd_ja_recebida = ? WHERE id = ? AND pedido_id = ?').run(qtd_ja_recebida, itemId, id);
+  res.json({ ok: true });
+});
+
+// ============ RETIRADAS PARCIAIS ============
+// Lista todas as retiradas de um pedido
+router.get('/:id/retiradas', (req, res) => {
+  const id = Number(req.params.id);
+  const retiradas = db.prepare(`
+    SELECT r.*, u.name AS criado_por_nome
+    FROM pedidos_compra_retiradas r
+    LEFT JOIN users u ON u.id = r.criado_por
+    WHERE r.pedido_id = ?
+    ORDER BY r.data_retirada, r.id
+  `).all(id);
+  for (const r of retiradas) {
+    r.itens = db.prepare(`
+      SELECT ri.*, pci.produto_id, p.sku, p.nome AS produto_nome
+      FROM pedidos_compra_retiradas_itens ri
+      JOIN pedidos_compra_itens pci ON pci.id = ri.item_id
+      JOIN produtos p ON p.id = pci.produto_id
+      WHERE ri.retirada_id = ?
+    `).all(r.id);
+  }
+  res.json(retiradas);
+});
+
+// Cria uma retirada parcial: incrementa estoque + lanca frete de coleta
+router.post('/:id/retiradas', (req, res) => {
+  const id = Number(req.params.id);
+  const {
+    data_retirada,
+    coletado_por,        // LEANDRO, RAFAEL_BOCAO, OUTRO
+    coletado_por_nome,
+    custo_coleta,        // opcional; se RAFAEL_BOCAO e null, usa setting
+    observacao,
+    itens = [],          // [{ item_id, quantidade }]
+    ja_no_baseline = false, // se true, nao mexe no estoque (usado pra retiradas historicas ja contadas)
+  } = req.body || {};
+
+  if (!coletado_por || !['LEANDRO','RAFAEL_BOCAO','OUTRO'].includes(coletado_por)) {
+    return res.status(400).json({ error: 'coletado_por invalido' });
+  }
+  if (!Array.isArray(itens) || itens.length === 0) return res.status(400).json({ error: 'itens obrigatorios' });
+
+  const pedido = db.prepare('SELECT * FROM pedidos_compra WHERE id = ?').get(id);
+  if (!pedido) return res.status(404).json({ error: 'nao encontrado' });
+  if (!['aberto','fechado','recebido'].includes(pedido.status)) return res.status(400).json({ error: 'status invalido pra retirar' });
+
+  // Determina custo_coleta
+  let coleta_final;
+  if (custo_coleta != null) coleta_final = Number(custo_coleta);
+  else if (coletado_por === 'RAFAEL_BOCAO') coleta_final = Number(getSetting('custo_coleta_rafael_bocao', '110'));
+  else if (coletado_por === 'LEANDRO') coleta_final = 0;
+  else return res.status(400).json({ error: 'custo_coleta obrigatorio quando OUTRO' });
+
+  const dataRet = data_retirada || new Date().toISOString().slice(0, 10);
+
+  const trans = db.transaction(() => {
+    // Cria a retirada
+    const info = db.prepare(`
+      INSERT INTO pedidos_compra_retiradas (pedido_id, data_retirada, coletado_por, coletado_por_nome, custo_coleta, observacao, ja_no_baseline, criado_por)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, dataRet, coletado_por, coletado_por_nome || null, coleta_final, observacao || null, ja_no_baseline ? 1 : 0, req.session.userId);
+    const retiradaId = info.lastInsertRowid;
+
+    // Total de pecas nessa retirada (pra rateio de frete)
+    const totalPecas = itens.reduce((s, it) => s + Number(it.quantidade || 0), 0);
+    const rateio = (coleta_final > 0 && totalPecas > 0) ? (coleta_final / totalPecas) : 0;
+
+    for (const it of itens) {
+      const item = db.prepare('SELECT * FROM pedidos_compra_itens WHERE id = ? AND pedido_id = ?').get(it.item_id, id);
+      if (!item) throw new Error('item ' + it.item_id + ' nao existe no pedido');
+      const jaRetirado = item.qtd_ja_recebida || 0;
+      const disponivel = item.quantidade - jaRetirado;
+      const qtdRet = Number(it.quantidade);
+      if (qtdRet <= 0) continue;
+      if (qtdRet > disponivel) throw new Error('quantidade solicitada de ' + item.produto_id + ' (' + qtdRet + ') > disponivel (' + disponivel + ')');
+
+      db.prepare('INSERT INTO pedidos_compra_retiradas_itens (retirada_id, item_id, quantidade) VALUES (?, ?, ?)').run(retiradaId, item.id, qtdRet);
+      db.prepare('UPDATE pedidos_compra_itens SET qtd_ja_recebida = qtd_ja_recebida + ? WHERE id = ?').run(qtdRet, item.id);
+
+      // Movimenta estoque (a menos que ja_no_baseline)
+      if (!ja_no_baseline) {
+        const p = db.prepare('SELECT estoque_atual FROM produtos WHERE id = ?').get(item.produto_id);
+        const novoSaldo = p.estoque_atual + qtdRet;
+        const custoComRateio = Number(item.custo_unitario) + rateio;
+        db.prepare('UPDATE produtos SET estoque_atual = ?, custo_unitario = ?, atualizado_em = datetime(\'now\') WHERE id = ?').run(novoSaldo, custoComRateio, item.produto_id);
+        const obsRateio = rateio > 0 ? ' (+ R$' + rateio.toFixed(2) + ' rateio frete)' : '';
+        db.prepare(`
+          INSERT INTO movimentos_estoque (produto_id, tipo, quantidade, saldo_apos, referencia_tipo, referencia_id, observacao, criado_por)
+          VALUES (?, 'ENTRADA_COMPRA', ?, ?, 'retirada_pedido', ?, ?, ?)
+        `).run(item.produto_id, qtdRet, novoSaldo, retiradaId, 'Retirada #' + retiradaId + ' pedido #' + id + obsRateio, req.session.userId);
+      }
+    }
+
+    // Lanca frete de coleta (se > 0 e nao ja_no_baseline)
+    if (coleta_final > 0 && !ja_no_baseline) {
+      const desc = coletado_por === 'RAFAEL_BOCAO'
+        ? 'Coleta pedido #' + id + ' - Rafael Bocao (' + dataRet + ')'
+        : coletado_por === 'OUTRO'
+          ? 'Coleta pedido #' + id + ' - ' + (coletado_por_nome || 'Outro') + ' (' + dataRet + ')'
+          : 'Coleta pedido #' + id + ' (' + dataRet + ')';
+      db.prepare(`
+        INSERT INTO lancamentos_caixa (tipo, categoria, descricao, valor, data, status, observacao, criado_por)
+        VALUES ('SAIDA', 'FRETE', ?, ?, ?, 'realizado', ?, ?)
+      `).run(desc, coleta_final, dataRet, 'Retirada parcial do pedido', req.session.userId);
+    }
+
+    return retiradaId;
+  });
+
+  try {
+    const retiradaId = trans();
+    res.status(201).json({ id: retiradaId });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Deleta uma retirada (desfaz estoque e lancamento)
+router.delete('/:id/retiradas/:retId', (req, res) => {
+  const id = Number(req.params.id);
+  const retId = Number(req.params.retId);
+
+  const ret = db.prepare('SELECT * FROM pedidos_compra_retiradas WHERE id = ? AND pedido_id = ?').get(retId, id);
+  if (!ret) return res.status(404).json({ error: 'nao encontrado' });
+
+  const trans = db.transaction(() => {
+    const itens = db.prepare(`
+      SELECT ri.*, pci.produto_id
+      FROM pedidos_compra_retiradas_itens ri
+      JOIN pedidos_compra_itens pci ON pci.id = ri.item_id
+      WHERE ri.retirada_id = ?
+    `).all(retId);
+
+    for (const it of itens) {
+      db.prepare('UPDATE pedidos_compra_itens SET qtd_ja_recebida = MAX(0, qtd_ja_recebida - ?) WHERE id = ?').run(it.quantidade, it.item_id);
+      if (!ret.ja_no_baseline) {
+        // Reverte estoque
+        const p = db.prepare('SELECT estoque_atual FROM produtos WHERE id = ?').get(it.produto_id);
+        const novoSaldo = p.estoque_atual - it.quantidade;
+        db.prepare('UPDATE produtos SET estoque_atual = ? WHERE id = ?').run(novoSaldo, it.produto_id);
+        db.prepare(`
+          INSERT INTO movimentos_estoque (produto_id, tipo, quantidade, saldo_apos, referencia_tipo, referencia_id, observacao, criado_por)
+          VALUES (?, 'AJUSTE', ?, ?, 'retirada_removida', ?, ?, ?)
+        `).run(it.produto_id, -it.quantidade, novoSaldo, retId, 'Retirada #' + retId + ' deletada', req.session.userId);
+      }
+    }
+    // Deleta lancamento de coleta se existir (nao ideal — melhor identificar por observacao)
+    // Por seguranca, deixa o lancamento e a pessoa reconcilia manualmente
+    db.prepare('DELETE FROM pedidos_compra_retiradas WHERE id = ?').run(retId);
+  });
+  trans();
   res.json({ ok: true });
 });
 

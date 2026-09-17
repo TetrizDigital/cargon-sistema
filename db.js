@@ -208,6 +208,36 @@ addColumn('produto_vinculos', 'qtd_anunciada',           'INTEGER');        // e
 addColumn('produto_vinculos', 'qtd_anunciada_atualizado', 'TEXT');           // quando foi lida do canal
 addColumn('pedidos_compra_itens', 'qtd_ja_recebida',    'INTEGER NOT NULL DEFAULT 0'); // retirada antecipada ja no baseline
 
+// -------- Retiradas parciais de pedidos (podem ter varias por pedido) --------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pedidos_compra_retiradas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pedido_id INTEGER NOT NULL,
+    data_retirada TEXT NOT NULL,
+    coletado_por TEXT,
+    coletado_por_nome TEXT,
+    custo_coleta REAL NOT NULL DEFAULT 0,
+    observacao TEXT,
+    ja_no_baseline INTEGER NOT NULL DEFAULT 0,
+    criado_em TEXT DEFAULT (datetime('now')),
+    criado_por INTEGER,
+    FOREIGN KEY (pedido_id) REFERENCES pedidos_compra(id) ON DELETE CASCADE,
+    FOREIGN KEY (criado_por) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS pedidos_compra_retiradas_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    retirada_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    quantidade INTEGER NOT NULL,
+    FOREIGN KEY (retirada_id) REFERENCES pedidos_compra_retiradas(id) ON DELETE CASCADE,
+    FOREIGN KEY (item_id) REFERENCES pedidos_compra_itens(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ret_pedido ON pedidos_compra_retiradas(pedido_id);
+  CREATE INDEX IF NOT EXISTS idx_ret_item ON pedidos_compra_retiradas_itens(item_id);
+`);
+
 // -------- Tabelas de pedidos de compra e inventario --------
 db.exec(`
   CREATE TABLE IF NOT EXISTS fornecedores (

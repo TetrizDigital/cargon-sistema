@@ -1165,8 +1165,30 @@ async function renderPedidoDetalhe(id) {
       </table>
       ${editavel && pedido.itens.some(it => (it.qtd_ja_recebida||0) < it.quantidade) ? `
       <div class="mt-1" style="display:flex;gap:.5rem;justify-content:flex-end">
-        <button class="btn-secondary" id="btnMarcarTudoRetirado">✓ Marcar todos os itens como retirados</button>
+        <button class="btn-primary" id="btnNovaRetirada">+ Registrar retirada</button>
       </div>` : ''}
+    </div>
+
+    <div class="card">
+      <h3>Retiradas realizadas (${(pedido.retiradas || []).length})</h3>
+      ${(pedido.retiradas || []).length === 0 ? '<p class="text-muted">Nenhuma retirada registrada ainda.</p>' : `
+      <table>
+        <thead><tr><th>Data</th><th>Quem buscou</th><th class="text-right">Custo coleta</th><th>Itens</th><th></th></tr></thead>
+        <tbody>
+          ${pedido.retiradas.map(r => `
+            <tr>
+              <td><strong>${fmtDate(r.data_retirada)}</strong></td>
+              <td>${r.coletado_por === 'RAFAEL_BOCAO' ? 'Rafael Bocao' : r.coletado_por === 'LEANDRO' ? 'Leandro' : (r.coletado_por_nome || 'Outro')}</td>
+              <td class="text-right value-money ${r.custo_coleta > 0 ? 'negativo' : 'text-muted'}">${r.custo_coleta > 0 ? money(r.custo_coleta) : '-'}</td>
+              <td class="text-small">
+                ${r.itens.map(it => `<div><code>${it.sku}</code> ${it.produto_nome.substring(0,35)}: <strong>${it.quantidade}</strong> un</div>`).join('')}
+              </td>
+              <td>${editavel ? `<button class="btn-secondary" data-remret="${r.id}">Desfazer</button>` : ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      `}
     </div>
   `;
 
@@ -1291,21 +1313,118 @@ async function renderPedidoDetalhe(id) {
       });
     });
 
-    const btnMarcarTudo = $('#btnMarcarTudoRetirado');
-    if (btnMarcarTudo) btnMarcarTudo.addEventListener('click', async () => {
-      if (!confirm('Marcar TODOS os itens do pedido como ja retirados? Isso significa que voce ja recebeu tudo fisicamente.')) return;
+    const btnNovaRet = $('#btnNovaRetirada');
+    if (btnNovaRet) btnNovaRet.addEventListener('click', async () => {
+      const cfg = await api('api/config');
+      const custoRafael = Number(cfg.custo_coleta_rafael_bocao || 110);
+      const disponivel = pedido.itens.filter(it => it.quantidade - (it.qtd_ja_recebida || 0) > 0);
+
+      const container = document.createElement('div');
+      container.className = 'card';
+      container.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;min-width:600px;max-width:90vw;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3)';
+      container.innerHTML = `
+        <h3>Registrar nova retirada</h3>
+        <div class="form-grid">
+          <label>Data <input type="date" id="retData" value="${new Date().toISOString().slice(0,10)}" /></label>
+          <label>Quem buscou
+            <select id="retColetadoPor">
+              <option value="LEANDRO">Leandro (grátis)</option>
+              <option value="RAFAEL_BOCAO" selected>Rafael Bocão (R$ ${custoRafael.toFixed(2)})</option>
+              <option value="OUTRO">Outro</option>
+            </select>
+          </label>
+          <label>Custo coleta (R$)
+            <input type="number" step="0.01" id="retCusto" value="${custoRafael}" />
+          </label>
+          <label id="retOutroWrap" style="display:none">Nome do transportador
+            <input id="retOutroNome" />
+          </label>
+        </div>
+
+        <h4 class="mt-1">Peças que estão sendo retiradas nesta viagem</h4>
+        <div class="text-small text-muted mb-1">Preencha a quantidade que veio hoje pra cada item. Deixa em branco os que não vieram.</div>
+        <table>
+          <thead><tr><th>Produto</th><th class="text-right">Disponível</th><th class="text-right">Retirando agora</th></tr></thead>
+          <tbody>
+            ${disponivel.map(it => {
+              const restante = it.quantidade - (it.qtd_ja_recebida || 0);
+              return `
+              <tr>
+                <td><code>${it.sku}</code> ${it.produto_nome.substring(0,40)}</td>
+                <td class="text-right">${restante}</td>
+                <td class="text-right">
+                  <input type="number" min="0" max="${restante}" style="width:80px;text-align:right" value="0" data-retitem="${it.id}" />
+                  <button class="btn-secondary" style="padding:2px 6px;font-size:.75rem" data-rettodos="${it.id}" data-max="${restante}">tudo</button>
+                </td>
+              </tr>
+            `;}).join('')}
+          </tbody>
+        </table>
+
+        <label class="mt-1">Observação (opcional) <input id="retObs" style="width:100%" /></label>
+
+        <div class="mt-1" style="display:flex;gap:.5rem;justify-content:flex-end">
+          <button class="btn-secondary" id="retCancel">Cancelar</button>
+          <button class="btn-primary" id="retSalvar">Salvar retirada</button>
+        </div>
+      `;
+      document.body.appendChild(container);
+      const back = document.createElement('div');
+      back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:99';
+      document.body.appendChild(back);
+      const fechar = () => { container.remove(); back.remove(); };
+      back.addEventListener('click', fechar);
+      container.querySelector('#retCancel').addEventListener('click', fechar);
+
+      const coletadoPor = container.querySelector('#retColetadoPor');
+      const custoInput = container.querySelector('#retCusto');
+      const outroWrap = container.querySelector('#retOutroWrap');
+      coletadoPor.addEventListener('change', () => {
+        if (coletadoPor.value === 'LEANDRO') custoInput.value = 0;
+        else if (coletadoPor.value === 'RAFAEL_BOCAO') custoInput.value = custoRafael;
+        outroWrap.style.display = coletadoPor.value === 'OUTRO' ? 'block' : 'none';
+      });
+
+      container.querySelectorAll('[data-rettodos]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const itId = btn.dataset.rettodos;
+          const max = btn.dataset.max;
+          container.querySelector(`[data-retitem="${itId}"]`).value = max;
+        });
+      });
+
+      container.querySelector('#retSalvar').addEventListener('click', async () => {
+        const itens = [];
+        container.querySelectorAll('[data-retitem]').forEach(inp => {
+          const qtd = Number(inp.value);
+          if (qtd > 0) itens.push({ item_id: Number(inp.dataset.retitem), quantidade: qtd });
+        });
+        if (itens.length === 0) { alert('Preencha ao menos 1 item'); return; }
+        try {
+          await api(`api/pedidos-compra/${id}/retiradas`, {
+            method: 'POST',
+            body: JSON.stringify({
+              data_retirada: container.querySelector('#retData').value,
+              coletado_por: coletadoPor.value,
+              coletado_por_nome: coletadoPor.value === 'OUTRO' ? container.querySelector('#retOutroNome').value : null,
+              custo_coleta: Number(custoInput.value),
+              observacao: container.querySelector('#retObs').value || null,
+              itens,
+            }),
+          });
+          fechar();
+          renderPedidoDetalhe(id);
+        } catch (err) { alert('Erro: ' + err.message); }
+      });
+    });
+
+    $$('[data-remret]').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Desfazer esta retirada? O estoque adicionado será revertido.')) return;
       try {
-        for (const it of pedido.itens) {
-          if ((it.qtd_ja_recebida || 0) < it.quantidade) {
-            await api(`api/pedidos-compra/${id}/itens/${it.id}/ja-recebida`, {
-              method: 'PATCH',
-              body: JSON.stringify({ qtd_ja_recebida: it.quantidade }),
-            });
-          }
-        }
+        await api(`api/pedidos-compra/${id}/retiradas/${btn.dataset.remret}`, { method: 'DELETE' });
         renderPedidoDetalhe(id);
       } catch (err) { alert('Erro: ' + err.message); }
-    });
+    }));
 
     $$('[data-remitem]').forEach(b => b.addEventListener('click', async () => {
       if (!confirm('Remover item?')) return;
