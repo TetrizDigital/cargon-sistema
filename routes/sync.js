@@ -50,6 +50,16 @@ router.post('/mercadopago', async (_req, res) => {
   }
 });
 
+router.post('/mercadoads', async (req, res) => {
+  try {
+    const ads = require('../integrations/mercadoads');
+    const r = await ads.syncCampanhas(req.query.de, req.query.ate);
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Recomputa taxas reais das vendas ML ja importadas
 // Busca /orders/{id} pra cada e atualiza mercadolibre_fee e shipping_cost_seller
 router.post('/recompute-ml', async (req, res) => {

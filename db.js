@@ -279,6 +279,48 @@ try {
   db.prepare(`INSERT OR IGNORE INTO fornecedores (nome, contato) VALUES ('Oliver Parts', 'Thaiza')`).run();
 } catch {}
 
+// -------- Tabelas Mercado Ads (Product Ads) --------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ads_campanhas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    advertiser_id TEXT NOT NULL,
+    campaign_id TEXT UNIQUE NOT NULL,
+    nome TEXT,
+    status TEXT,
+    strategy TEXT,
+    channel TEXT,
+    budget REAL,
+    daily_budget REAL,
+    automatic_budget INTEGER DEFAULT 0,
+    acos_target REAL,
+    roas_target REAL,
+    date_created TEXT,
+    last_updated TEXT,
+    atualizado_em TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS ads_metricas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id TEXT NOT NULL,
+    periodo_de TEXT NOT NULL,
+    periodo_ate TEXT NOT NULL,
+    clicks INTEGER DEFAULT 0,
+    prints INTEGER DEFAULT 0,
+    cost REAL DEFAULT 0,
+    cpc REAL DEFAULT 0,
+    ctr REAL DEFAULT 0,
+    acos REAL DEFAULT 0,
+    direct_amount REAL DEFAULT 0,
+    total_amount REAL DEFAULT 0,
+    organic_units_quantity INTEGER DEFAULT 0,
+    atualizado_em TEXT DEFAULT (datetime('now')),
+    UNIQUE(campaign_id, periodo_de, periodo_ate)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ads_camp_status ON ads_campanhas(status);
+  CREATE INDEX IF NOT EXISTS idx_ads_metricas_periodo ON ads_metricas(periodo_de, periodo_ate);
+`);
+
 // -------- Tabela de movimentos Mercado Pago --------
 db.exec(`
   CREATE TABLE IF NOT EXISTS movimentos_mp (

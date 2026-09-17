@@ -47,10 +47,12 @@ const pedidosCompra = require('./routes/pedidosCompra');
 const inventario = require('./routes/inventario');
 const config = require('./routes/config');
 const mercadopago = require('./routes/mercadopago');
+const adsRoutes = require('./routes/ads');
 
 const ml = require('./integrations/mercadolivre');
 const site = require('./integrations/site');
 const mp = require('./integrations/mercadopago');
+const ads = require('./integrations/mercadoads');
 
 function getSessionSecret() {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
@@ -114,6 +116,7 @@ app.use('/api/pedidos-compra', requireAuth, pedidosCompra);
 app.use('/api/inventario', requireAuth, inventario);
 app.use('/api/config', requireAuth, config);
 app.use('/api/mp', requireAuth, mercadopago);
+app.use('/api/ads', requireAuth, adsRoutes);
 
 // -------- OAuth ML --------
 app.get('/api/ml/authorize', requireAuth, (_req, res) => {
@@ -186,6 +189,12 @@ if (process.env.SYNC_ENABLED === 'true' && !global.__sistema_cron_started) {
       setInterval(() => { mp.syncPayments().catch(e => console.error('[sistema][cron mp]', e.message)); }, MP_INTERVAL_MS);
     }, 11 * 60 * 1000);
   }
+
+  // Ads sync: uma vez por hora (dados sao pesados pra puxar; nao muda de minuto em minuto)
+  const ADS_INTERVAL_MS = 60 * 60 * 1000;
+  setTimeout(() => {
+    setInterval(() => { ads.syncCampanhas().catch(e => console.error('[sistema][cron ads]', e.message)); }, ADS_INTERVAL_MS);
+  }, 5 * 60 * 1000);
 
   console.log('[sistema] jobs de sync agendados (setInterval)');
 }

@@ -58,11 +58,12 @@ routes.dashboard = async () => {
   const per = periodoDoMes(DASHBOARD_STATE.offset);
   const qs = `?de=${per.de}&ate=${per.ate}`;
 
-  const [resumo, estoque, vendas, saldoMp] = await Promise.all([
+  const [resumo, estoque, vendas, saldoMp, adsResumo] = await Promise.all([
     api('api/financeiro/resumo' + qs),
     api('api/estoque'),
     api('api/vendas' + qs + '&limit=10'),
     api('api/mp/saldo').catch(() => ({ saldo: { disponivel_estimado: 0, a_liberar: 0, a_liberar_qtd: 0, total: 0 } })),
+    api('api/ads/resumo' + qs).catch(() => ({ totais: { gasto_total: 0, clicks: 0, prints: 0, total_amount: 0, roas: 0 } })),
   ]);
 
   const v = resumo.vendas || { totais: {}, cmv: 0, lucro_bruto: 0, taxa_media_pct: 0, ticket_medio: 0, por_canal: [] };
@@ -70,6 +71,8 @@ routes.dashboard = async () => {
   const aReceber = resumo.a_receber_ml || { qtd: 0, total_liquido: 0, total_bruto: 0 };
   const proximosRepasses = resumo.proximos_repasses || [];
   const mpSaldo = saldoMp.saldo || { disponivel_estimado: 0, a_liberar: 0, total: 0 };
+  const adsT = adsResumo.totais || { gasto_total: 0, clicks: 0, total_amount: 0, roas: 0 };
+  const lucroReal = v.lucro_bruto - adsT.gasto_total;
 
   $('#content').innerHTML = `
     <div class="page-header">
@@ -128,10 +131,15 @@ routes.dashboard = async () => {
         <div class="kpi-value">${money(v.cmv)}</div>
         <div class="kpi-sub">unidades vendidas × custo</div>
       </div>
-      <div class="kpi ${v.lucro_bruto >= 0 ? 'ok' : 'warn'}">
-        <div class="kpi-label">LUCRO BRUTO</div>
-        <div class="kpi-value">${money(v.lucro_bruto)}</div>
-        <div class="kpi-sub">receita − taxas − frete − CMV</div>
+      <div class="kpi warn">
+        <div class="kpi-label">Gasto Mercado Ads</div>
+        <div class="kpi-value">${money(adsT.gasto_total)}</div>
+        <div class="kpi-sub">${adsT.clicks || 0} cliques · ROAS ${(adsT.roas || 0).toFixed(2)}x</div>
+      </div>
+      <div class="kpi ${lucroReal >= 0 ? 'ok' : 'warn'}">
+        <div class="kpi-label">LUCRO REAL (apos Ads)</div>
+        <div class="kpi-value">${money(lucroReal)}</div>
+        <div class="kpi-sub">bruto − ads = lucro liquido</div>
       </div>
     </div>
 
@@ -511,6 +519,86 @@ routes.sync = async () => {
     } catch (err) {
       alert('Erro: ' + err.message);
     }
+  });
+};
+
+// ============ MERCADO ADS ============
+routes.ads = async () => {
+  const per = periodoDoMes(DASHBOARD_STATE.offset);
+  const data = await api(`api/ads/resumo?de=${per.de}&ate=${per.ate}`);
+  const t = data.totais || {};
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h2>Mercado Ads (${per.label})</h2>
+      <div class="actions">
+        <button id="btnSyncAds" class="btn-primary">Sync agora</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi warn">
+        <div class="kpi-label">Gasto total no mes</div>
+        <div class="kpi-value">${money(t.gasto_total)}</div>
+        <div class="kpi-sub">${t.total_campanhas || 0} campanha${t.total_campanhas === 1 ? '' : 's'}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Impressoes / Cliques</div>
+        <div class="kpi-value">${(t.prints || 0).toLocaleString('pt-BR')}</div>
+        <div class="kpi-sub">${(t.clicks || 0).toLocaleString('pt-BR')} cliques · CTR ${(t.ctr_medio || 0).toFixed(2)}%</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">CPC medio</div>
+        <div class="kpi-value">${money(t.cpc_medio)}</div>
+        <div class="kpi-sub">custo por clique</div>
+      </div>
+      <div class="kpi ok">
+        <div class="kpi-label">Vendas geradas (Ads)</div>
+        <div class="kpi-value">${money(t.total_amount)}</div>
+        <div class="kpi-sub">direto: ${money(t.direct_amount)}</div>
+      </div>
+      <div class="kpi ${(t.roas || 0) >= 4 ? 'ok' : 'warn'}">
+        <div class="kpi-label">ROAS</div>
+        <div class="kpi-value">${(t.roas || 0).toFixed(2)}x</div>
+        <div class="kpi-sub">ACOS ${(t.acos_geral || 0).toFixed(1)}%</div>
+      </div>
+    </div>
+
+    <div class="card mt-1">
+      <h3>Campanhas (${(data.campanhas || []).length})</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th><th>Status</th><th class="text-right">Diario</th>
+            <th class="text-right">Cost</th><th class="text-right">Cliques</th><th class="text-right">CPC</th>
+            <th class="text-right">CTR</th><th class="text-right">Vendas</th><th class="text-right">ROAS</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(data.campanhas || []).map(c => `
+            <tr>
+              <td>${c.nome || '(sem nome)'}</td>
+              <td><span class="badge ${c.status === 'active' ? 'ok' : 'warn'}">${c.status || '-'}</span></td>
+              <td class="text-right">${money(c.daily_budget)}</td>
+              <td class="text-right value-money negativo">${money(c.cost)}</td>
+              <td class="text-right">${c.clicks || 0}</td>
+              <td class="text-right">${money(c.cpc)}</td>
+              <td class="text-right">${(c.ctr || 0).toFixed(2)}%</td>
+              <td class="text-right value-money positivo">${money(c.total_amount)}</td>
+              <td class="text-right">${c.cost > 0 ? ((c.total_amount || 0) / c.cost).toFixed(2) + 'x' : '-'}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="9" class="text-muted">Nenhuma campanha ainda. Roda Sync agora.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  $('#btnSyncAds').addEventListener('click', async () => {
+    try {
+      const r = await api(`api/sync/mercadoads?de=${per.de}&ate=${per.ate}`, { method: 'POST' });
+      alert(`Ads: ${r.processados} campanhas atualizadas`);
+      routes.ads();
+    } catch (err) { alert('Erro: ' + err.message); }
   });
 };
 
