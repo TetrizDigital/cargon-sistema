@@ -8,20 +8,37 @@ const router = express.Router();
 router.get('/saldo', (_req, res) => {
   const saldo = mp.calcularSaldo();
 
+  // Proximas liberacoes: inclui approved-pending E in_mediation (bate com painel MP)
   const proximasLiberacoes = db.prepare(`
     SELECT date(money_release_date) AS data,
            COUNT(*) AS qtd,
-           SUM(net_received_amount) AS valor
+           SUM(net_received_amount) AS valor,
+           SUM(CASE WHEN status = 'in_mediation' THEN 1 ELSE 0 END) AS mediacoes
     FROM movimentos_mp
-    WHERE status = 'approved'
+    WHERE ((status = 'approved' AND json_extract(raw_json, '$.money_release_status') = 'pending')
+        OR status = 'in_mediation')
       AND money_release_date IS NOT NULL
-      AND date(money_release_date) > date('now')
-      AND date(money_release_date) <= date('now', '+45 days')
+      AND date(money_release_date) >= date('now')
+      AND date(money_release_date) <= date('now', '+60 days')
     GROUP BY date(money_release_date)
     ORDER BY data
   `).all();
 
-  res.json({ saldo, proximas_liberacoes: proximasLiberacoes });
+  // Agrupado por mes (pra comparar com painel MP)
+  const porMes = db.prepare(`
+    SELECT strftime('%Y-%m', money_release_date) AS mes,
+           COUNT(*) AS qtd,
+           SUM(net_received_amount) AS valor
+    FROM movimentos_mp
+    WHERE ((status = 'approved' AND json_extract(raw_json, '$.money_release_status') = 'pending')
+        OR status = 'in_mediation')
+      AND money_release_date IS NOT NULL
+      AND date(money_release_date) >= date('now')
+    GROUP BY mes
+    ORDER BY mes
+  `).all();
+
+  res.json({ saldo, proximas_liberacoes: proximasLiberacoes, por_mes: porMes });
 });
 
 router.get('/movimentos', (req, res) => {

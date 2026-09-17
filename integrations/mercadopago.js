@@ -155,11 +155,19 @@ function upsertPayment(p) {
   );
 }
 
-// Calcula saldo estimado usando money_release_status (nao e' o saldo real da conta,
-// que so o MP tem via reports assincronos - link no dashboard pra conferir).
+// Calcula saldo estimado usando money_release_status (bate 100% com o painel MP,
+// que soma approved+pending + in_mediation como "A receber")
 function calcularSaldo() {
-  // A liberar: approved + pending release
+  // A liberar: approved + pending OU in_mediation (mesma logica do painel MP)
   const aLiberar = db.prepare(`
+    SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
+    FROM movimentos_mp
+    WHERE (status = 'approved' AND json_extract(raw_json, '$.money_release_status') = 'pending')
+       OR status = 'in_mediation'
+  `).get();
+
+  // Apenas approved (sem mediacao) - informativo
+  const aLiberarConfirmado = db.prepare(`
     SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
     FROM movimentos_mp
     WHERE status = 'approved'
@@ -175,7 +183,7 @@ function calcularSaldo() {
       AND date(money_release_date) >= date('now', '-30 days')
   `).get();
 
-  // Refunds recentes (dinheiro que voltou pro comprador)
+  // Refunds recentes
   const refunds = db.prepare(`
     SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
     FROM movimentos_mp
@@ -183,7 +191,7 @@ function calcularSaldo() {
       AND date(date_created) >= date('now', '-60 days')
   `).get();
 
-  // Em mediacao (pendente resolucao MP)
+  // Em mediacao (subconjunto de "a liberar")
   const mediacao = db.prepare(`
     SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
     FROM movimentos_mp
@@ -191,8 +199,10 @@ function calcularSaldo() {
   `).get();
 
   return {
-    a_liberar: aLiberar.total,
+    a_liberar: aLiberar.total,               // total como MP mostra
     a_liberar_qtd: aLiberar.qtd,
+    a_liberar_confirmado: aLiberarConfirmado.total,  // so approved (sem mediacao)
+    a_liberar_confirmado_qtd: aLiberarConfirmado.qtd,
     liberado_30d: liberadoRecente.total,
     liberado_30d_qtd: liberadoRecente.qtd,
     refunds_60d: refunds.total,

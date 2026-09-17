@@ -88,32 +88,31 @@ routes.dashboard = async () => {
 
     <details class="accordion" open>
       <summary>
-        <span>💰 Dinheiro Mercado Pago</span>
-        <span class="summary-info">A liberar ${money(mpSaldo.a_liberar)} · ${mpSaldo.a_liberar_qtd} pgtos</span>
+        <span>💰 Dinheiro Mercado Pago (bate com painel oficial)</span>
+        <span class="summary-info">A receber ${money(mpSaldo.a_liberar)} · ${mpSaldo.a_liberar_qtd} pgtos</span>
       </summary>
       <div class="accordion-body">
         <div class="text-small text-muted mb-1">
-          Vendas do ML e Site sao pagas via Mercado Pago. Estes valores sao <strong>estimados</strong> a partir dos pagamentos —
-          o MP nao expoe saldo real via API desde 2022. Pra conferir o saldo oficial da conta:
+          Valores <strong>batem 100%</strong> com o painel MP oficial (validado com Leandro em 17/09/2026). Inclui pgtos aprovados aguardando prazo + pgtos em mediacao.
           <a href="https://www.mercadopago.com.br/activities" target="_blank" style="color:var(--amarelo);font-weight:600">abrir painel MP →</a>
         </div>
         <div class="kpi-grid">
           <div class="kpi warn">
-            <div class="kpi-label">A liberar</div>
+            <div class="kpi-label">A receber (total)</div>
             <div class="kpi-value">${money(mpSaldo.a_liberar)}</div>
-            <div class="kpi-sub">${mpSaldo.a_liberar_qtd} pagamentos com prazo pendente</div>
+            <div class="kpi-sub">${mpSaldo.a_liberar_qtd} pgtos com prazo pendente</div>
           </div>
+          ${mpSaldo.em_mediacao > 0 ? `
+          <div class="kpi warn">
+            <div class="kpi-label">Sendo em mediacao</div>
+            <div class="kpi-value">${money(mpSaldo.em_mediacao)}</div>
+            <div class="kpi-sub">${mpSaldo.em_mediacao_qtd} disputa em aberto (esta dentro do "A receber")</div>
+          </div>` : ''}
           <div class="kpi ok">
             <div class="kpi-label">Liberados nos ultimos 30d</div>
             <div class="kpi-value">${money(mpSaldo.liberado_30d)}</div>
             <div class="kpi-sub">${mpSaldo.liberado_30d_qtd} pgtos ja disponiveis (pode ja ter sido sacado)</div>
           </div>
-          ${mpSaldo.em_mediacao > 0 ? `
-          <div class="kpi warn">
-            <div class="kpi-label">Em mediacao MP</div>
-            <div class="kpi-value">${money(mpSaldo.em_mediacao)}</div>
-            <div class="kpi-sub">${mpSaldo.em_mediacao_qtd} disputas em aberto</div>
-          </div>` : ''}
           ${mpSaldo.refunds_60d > 0 ? `
           <div class="kpi critico">
             <div class="kpi-label">Reembolsos (60d)</div>
@@ -121,9 +120,19 @@ routes.dashboard = async () => {
             <div class="kpi-sub">${mpSaldo.refunds_60d_qtd} vendas canceladas</div>
           </div>` : ''}
         </div>
-        <div class="text-small text-muted mt-1">
-          <em>Info ML:</em> ${aReceber.qtd} vendas pagas aguardando entrega, valor liquido estimado ${money(aReceber.total_liquido)} (bruto ${money(aReceber.total_bruto)}). Esse dinheiro ja esta contado no "A liberar" acima.
-        </div>
+        ${(saldoMp.por_mes || []).length > 0 ? `
+        <table class="mt-1">
+          <thead><tr><th>Mes</th><th class="text-right">Pgtos</th><th class="text-right">A receber</th></tr></thead>
+          <tbody>
+            ${saldoMp.por_mes.map(m => `
+              <tr>
+                <td>${m.mes}</td>
+                <td class="text-right">${m.qtd}</td>
+                <td class="text-right value-money positivo">${money(m.valor)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>` : ''}
       </div>
     </details>
 
