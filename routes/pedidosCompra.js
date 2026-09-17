@@ -101,7 +101,7 @@ router.patch('/:id', (req, res) => {
   const id = Number(req.params.id);
   const pedido = db.prepare('SELECT status FROM pedidos_compra WHERE id = ?').get(id);
   if (!pedido) return res.status(404).json({ error: 'nao encontrado' });
-  if (pedido.status !== 'aberto') return res.status(400).json({ error: 'so pedidos abertos podem ser editados' });
+  if (!['aberto', 'fechado'].includes(pedido.status)) return res.status(400).json({ error: 'so pedidos abertos ou fechados podem ser editados' });
 
   const campos = ['fornecedor_id', 'data_pedido', 'observacao'];
   const upd = [];
@@ -115,13 +115,123 @@ router.patch('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Adicionar item a pedido aberto/fechado
+router.post('/:id/itens', (req, res) => {
+  const id = Number(req.params.id);
+  const { produto_id, quantidade, custo_unitario } = req.body || {};
+  if (!produto_id || !quantidade || !custo_unitario) return res.status(400).json({ error: 'produto_id, quantidade, custo_unitario obrigatorios' });
+  const pedido = db.prepare('SELECT status FROM pedidos_compra WHERE id = ?').get(id);
+  if (!pedido) return res.status(404).json({ error: 'nao encontrado' });
+  if (!['aberto', 'fechado'].includes(pedido.status)) return res.status(400).json({ error: 'so pedidos abertos ou fechados podem receber itens' });
+
+  const info = db.prepare('INSERT INTO pedidos_compra_itens (pedido_id, produto_id, quantidade, custo_unitario) VALUES (?, ?, ?, ?)')
+    .run(id, produto_id, quantidade, custo_unitario);
+  recalcularTotal(id);
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+// Atualizar item (quantidade/custo)
+router.patch('/:id/itens/:itemId', (req, res) => {
+  const id = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  const pedido = db.prepare('SELECT status FROM pedidos_compra WHERE id = ?').get(id);
+  if (!pedido) return res.status(404).json({ error: 'nao encontrado' });
+  if (!['aberto', 'fechado'].includes(pedido.status)) return res.status(400).json({ error: 'nao editavel' });
+  const { quantidade, custo_unitario } = req.body || {};
+  const upd = [];
+  const vals = [];
+  if (quantidade != null) { upd.push('quantidade = ?'); vals.push(quantidade); }
+  if (custo_unitario != null) { upd.push('custo_unitario = ?'); vals.push(custo_unitario); }
+  if (upd.length === 0) return res.json({ ok: true });
+  vals.push(itemId, id);
+  db.prepare('UPDATE pedidos_compra_itens SET ' + upd.join(', ') + ' WHERE id = ? AND pedido_id = ?').run(...vals);
+  recalcularTotal(id);
+  res.json({ ok: true });
+});
+
+// Remover item
+router.delete('/:id/itens/:itemId', (req, res) => {
+  const id = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  const pedido = db.prepare('SELECT status FROM pedidos_compra WHERE id = ?').get(id);
+  if (!pedido) return res.status(404).json({ error: 'nao encontrado' });
+  if (!['aberto', 'fechado'].includes(pedido.status)) return res.status(400).json({ error: 'nao editavel' });
+  db.prepare('DELETE FROM pedidos_compra_itens WHERE id = ? AND pedido_id = ?').run(itemId, id);
+  recalcularTotal(id);
+  res.json({ ok: true });
+});
+
+function recalcularTotal(pedidoId) {
+  const total = db.prepare('SELECT COALESCE(SUM(quantidade * custo_unitario), 0) AS t FROM pedidos_compra_itens WHERE pedido_id = ?').get(pedidoId).t;
+  db.prepare('UPDATE pedidos_compra SET valor_total = ? WHERE id = ?').run(total, pedidoId);
+}
+
+// Fechar pedido: aberto -> fechado (nao muda estoque nem caixa, so muda status)
+router.post('/:id/fechar', (req, res) => {
+  const id = Number(req.params.id);
+  const p = db.prepare('SELECT status FROM pedidos_compra WHERE id = ?').get(id);
+  if (!p) return res.status(404).json({ error: 'nao encontrado' });
+  if (p.status !== 'aberto') return res.status(400).json({ error: 'so pedidos abertos podem ser fechados' });
+  db.prepare(`UPDATE pedidos_compra SET status = 'fechado' WHERE id = ?`).run(id);
+  res.json({ ok: true });
+});
+
+// Reabrir pedido: fechado -> aberto (permite editar de novo)
+router.post('/:id/reabrir', (req, res) => {
+  const id = Number(req.params.id);
+  const p = db.prepare('SELECT status FROM pedidos_compra WHERE id = ?').get(id);
+  if (!p) return res.status(404).json({ error: 'nao encontrado' });
+  if (p.status !== 'fechado') return res.status(400).json({ error: 'so pedidos fechados podem ser reabertos' });
+  db.prepare(`UPDATE pedidos_compra SET status = 'aberto' WHERE id = ?`).run(id);
+  res.json({ ok: true });
+});
+
 router.delete('/:id', (req, res) => {
   const id = Number(req.params.id);
   const p = db.prepare('SELECT status FROM pedidos_compra WHERE id = ?').get(id);
   if (!p) return res.status(404).json({ error: 'nao encontrado' });
-  if (p.status !== 'aberto') return res.status(400).json({ error: 'so pedidos abertos podem ser deletados' });
+  if (!['aberto', 'fechado'].includes(p.status)) return res.status(400).json({ error: 'so pedidos abertos ou fechados podem ser deletados' });
   db.prepare('DELETE FROM pedidos_compra WHERE id = ?').run(id);
   res.json({ ok: true });
+});
+
+// Importar pedido historico (nao mexe em estoque nem caixa - so registro)
+router.post('/importar-historico', (req, res) => {
+  const {
+    fornecedor_id, data_pedido, data_recebimento,
+    coletado_por, coletado_por_nome, custo_coleta = 0,
+    status = 'recebido', observacao,
+    itens = [],
+  } = req.body || {};
+  if (!fornecedor_id || !data_pedido) return res.status(400).json({ error: 'fornecedor_id, data_pedido obrigatorios' });
+
+  const trans = db.transaction(() => {
+    let total = 0;
+    for (const it of itens) total += (it.quantidade || 0) * (it.custo_unitario || 0);
+
+    const info = db.prepare(`
+      INSERT INTO pedidos_compra
+        (fornecedor_id, data_pedido, data_recebimento, valor_total, coletado_por, coletado_por_nome, custo_coleta, status, observacao, criado_por, recebido_em)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      fornecedor_id, data_pedido, data_recebimento || null, total,
+      coletado_por || null, coletado_por_nome || null, custo_coleta,
+      status,
+      (observacao || '') + ' [importado como historico - nao afeta estoque]',
+      req.session.userId,
+      status === 'recebido' ? (data_recebimento || data_pedido) : null,
+    );
+    const pedidoId = info.lastInsertRowid;
+    const ins = db.prepare('INSERT INTO pedidos_compra_itens (pedido_id, produto_id, quantidade, custo_unitario) VALUES (?, ?, ?, ?)');
+    for (const it of itens) {
+      if (!it.produto_id || !it.quantidade) continue;
+      ins.run(pedidoId, it.produto_id, it.quantidade, it.custo_unitario || 280);
+    }
+    return pedidoId;
+  });
+
+  const id = trans();
+  res.status(201).json({ id });
 });
 
 // Receber pedido: baixa estoque, lanca no caixa
