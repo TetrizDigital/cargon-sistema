@@ -155,30 +155,50 @@ function upsertPayment(p) {
   );
 }
 
-// Calcula saldo consolidado
+// Calcula saldo estimado usando money_release_status (nao e' o saldo real da conta,
+// que so o MP tem via reports assincronos - link no dashboard pra conferir).
 function calcularSaldo() {
-  const hoje = new Date().toISOString();
-
-  const disponivel = db.prepare(`
-    SELECT COALESCE(SUM(net_received_amount), 0) AS total
-    FROM movimentos_mp
-    WHERE status = 'approved'
-      AND (money_release_date IS NULL OR money_release_date <= ?)
-  `).get(hoje).total;
-
+  // A liberar: approved + pending release
   const aLiberar = db.prepare(`
     SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
     FROM movimentos_mp
     WHERE status = 'approved'
-      AND money_release_date IS NOT NULL
-      AND money_release_date > ?
-  `).get(hoje);
+      AND json_extract(raw_json, '$.money_release_status') = 'pending'
+  `).get();
+
+  // Ja liberado (nos ultimos 30d) - pode ja ter sido sacado
+  const liberadoRecente = db.prepare(`
+    SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
+    FROM movimentos_mp
+    WHERE status = 'approved'
+      AND json_extract(raw_json, '$.money_release_status') = 'released'
+      AND date(money_release_date) >= date('now', '-30 days')
+  `).get();
+
+  // Refunds recentes (dinheiro que voltou pro comprador)
+  const refunds = db.prepare(`
+    SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
+    FROM movimentos_mp
+    WHERE status IN ('refunded', 'charged_back')
+      AND date(date_created) >= date('now', '-60 days')
+  `).get();
+
+  // Em mediacao (pendente resolucao MP)
+  const mediacao = db.prepare(`
+    SELECT COALESCE(SUM(net_received_amount), 0) AS total, COUNT(*) AS qtd
+    FROM movimentos_mp
+    WHERE status = 'in_mediation'
+  `).get();
 
   return {
-    disponivel_estimado: disponivel,
     a_liberar: aLiberar.total,
     a_liberar_qtd: aLiberar.qtd,
-    total: disponivel + aLiberar.total,
+    liberado_30d: liberadoRecente.total,
+    liberado_30d_qtd: liberadoRecente.qtd,
+    refunds_60d: refunds.total,
+    refunds_60d_qtd: refunds.qtd,
+    em_mediacao: mediacao.total,
+    em_mediacao_qtd: mediacao.qtd,
   };
 }
 
