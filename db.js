@@ -205,6 +205,80 @@ addColumn('vendas', 'shipping_id',           'TEXT');                       // i
 addColumn('vendas', 'payment_method',        'TEXT');                       // pix, credit_card, etc
 addColumn('vendas', 'taxa_detalhes',         'TEXT');                       // JSON com detalhes brutos (fee_details, etc)
 
+// -------- Tabelas de pedidos de compra e inventario --------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS fornecedores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT UNIQUE NOT NULL,
+    contato TEXT,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS pedidos_compra (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fornecedor_id INTEGER NOT NULL,
+    data_pedido TEXT NOT NULL,
+    data_recebimento TEXT,
+    valor_total REAL NOT NULL DEFAULT 0,
+    coletado_por TEXT,
+    coletado_por_nome TEXT,
+    custo_coleta REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'aberto',
+    observacao TEXT,
+    criado_em TEXT DEFAULT (datetime('now')),
+    recebido_em TEXT,
+    criado_por INTEGER,
+    FOREIGN KEY (fornecedor_id) REFERENCES fornecedores(id),
+    FOREIGN KEY (criado_por) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS pedidos_compra_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pedido_id INTEGER NOT NULL,
+    produto_id INTEGER NOT NULL,
+    quantidade INTEGER NOT NULL,
+    custo_unitario REAL NOT NULL,
+    FOREIGN KEY (pedido_id) REFERENCES pedidos_compra(id) ON DELETE CASCADE,
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pc_status ON pedidos_compra(status);
+  CREATE INDEX IF NOT EXISTS idx_pc_fornecedor ON pedidos_compra(fornecedor_id);
+  CREATE INDEX IF NOT EXISTS idx_pci_pedido ON pedidos_compra_itens(pedido_id);
+
+  CREATE TABLE IF NOT EXISTS inventarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data_contagem TEXT NOT NULL,
+    usuario_id INTEGER,
+    observacao TEXT,
+    status TEXT NOT NULL DEFAULT 'aberto',
+    criado_em TEXT DEFAULT (datetime('now')),
+    finalizado_em TEXT,
+    FOREIGN KEY (usuario_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS inventarios_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inventario_id INTEGER NOT NULL,
+    produto_id INTEGER NOT NULL,
+    qtd_antes INTEGER NOT NULL,
+    qtd_contada INTEGER,
+    diferenca INTEGER,
+    FOREIGN KEY (inventario_id) REFERENCES inventarios(id) ON DELETE CASCADE,
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_inv_status ON inventarios(status);
+  CREATE INDEX IF NOT EXISTS idx_invi_inv ON inventarios_itens(inventario_id);
+`);
+
+// Seed fornecedor Oliver Parts
+try {
+  db.prepare(`INSERT OR IGNORE INTO fornecedores (nome, contato) VALUES ('Oliver Parts', 'Thaiza')`).run();
+} catch {}
+
 function getSetting(key, defaultValue = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : defaultValue;

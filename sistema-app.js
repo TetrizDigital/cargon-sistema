@@ -43,6 +43,9 @@ const vendas = require('./routes/vendas');
 const estoque = require('./routes/estoque');
 const financeiro = require('./routes/financeiro');
 const sync = require('./routes/sync');
+const pedidosCompra = require('./routes/pedidosCompra');
+const inventario = require('./routes/inventario');
+const config = require('./routes/config');
 
 const ml = require('./integrations/mercadolivre');
 const site = require('./integrations/site');
@@ -105,6 +108,9 @@ app.use('/api/vendas', requireAuth, vendas);
 app.use('/api/estoque', requireAuth, estoque);
 app.use('/api/financeiro', requireAuth, financeiro);
 app.use('/api/sync', requireAuth, sync);
+app.use('/api/pedidos-compra', requireAuth, pedidosCompra);
+app.use('/api/inventario', requireAuth, inventario);
+app.use('/api/config', requireAuth, config);
 
 // -------- OAuth ML --------
 app.get('/api/ml/authorize', requireAuth, (_req, res) => {

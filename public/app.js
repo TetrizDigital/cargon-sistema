@@ -490,6 +490,314 @@ routes.sync = async () => {
   });
 };
 
+// ============ PEDIDOS DE COMPRA ============
+routes.pedidos = async () => {
+  const [pedidos, fornecedores, produtos, cfg] = await Promise.all([
+    api('api/pedidos-compra'),
+    api('api/pedidos-compra/fornecedores'),
+    api('api/produtos'),
+    api('api/config'),
+  ]);
+  const custoRafael = Number(cfg.custo_coleta_rafael_bocao || 110);
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h2>Pedidos de compra</h2>
+      <div class="actions">
+        <button id="btnNovoPedido" class="btn-primary">Novo pedido</button>
+      </div>
+    </div>
+
+    <div id="formNovoPedido" class="card" style="display:none">
+      <h3>Novo pedido</h3>
+      <div class="form-grid">
+        <label>Fornecedor
+          <select id="novoFornecedor">
+            ${fornecedores.map(f => `<option value="${f.id}">${f.nome}</option>`).join('')}
+          </select>
+        </label>
+        <label>Data do pedido
+          <input type="date" id="novaData" value="${new Date().toISOString().slice(0,10)}" />
+        </label>
+        <label>Observacao <input id="novaObs" placeholder="opcional" /></label>
+      </div>
+      <h4 class="mt-1">Itens</h4>
+      <table id="itensTable">
+        <thead><tr><th>Produto</th><th>Qtd</th><th>Custo unit.</th><th>Subtotal</th><th></th></tr></thead>
+        <tbody id="itensBody"></tbody>
+      </table>
+      <div class="mt-1" style="display:flex;gap:.5rem;align-items:center;justify-content:space-between">
+        <button id="btnAddItem" class="btn-secondary">+ item</button>
+        <div>Total: <strong id="totalPedido">R$ 0,00</strong></div>
+        <div>
+          <button id="btnCancelarNovo" class="btn-secondary">Cancelar</button>
+          <button id="btnSalvarPedido" class="btn-primary">Salvar pedido</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Pedidos (${pedidos.length})</h3>
+      <table>
+        <thead><tr><th>#</th><th>Data</th><th>Fornecedor</th><th class="text-right">Itens</th><th class="text-right">Pecas</th><th class="text-right">Valor</th><th>Status</th><th>Coleta</th><th></th></tr></thead>
+        <tbody>
+          ${pedidos.map(p => `
+            <tr>
+              <td>#${p.id}</td>
+              <td>${fmtDate(p.data_pedido)}</td>
+              <td>${p.fornecedor_nome}</td>
+              <td class="text-right">${p.itens_count}</td>
+              <td class="text-right">${p.total_pecas || 0}</td>
+              <td class="text-right value-money">${money(p.valor_total)}</td>
+              <td><span class="badge ${p.status === 'recebido' ? 'ok' : p.status === 'cancelado' ? 'critico' : 'warn'}">${p.status}</span></td>
+              <td>${p.coletado_por ? (p.coletado_por === 'RAFAEL_BOCAO' ? 'Rafael Bocao' : p.coletado_por === 'LEANDRO' ? 'Leandro' : (p.coletado_por_nome || 'Outro')) + (p.custo_coleta > 0 ? ' · ' + money(p.custo_coleta) : '') : '-'}</td>
+              <td>${p.status === 'aberto' ? `<button class="btn-secondary" data-receber="${p.id}">Receber</button>` : ''}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="9" class="text-muted">Nenhum pedido ainda.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  const itens = [];
+  function renderItens() {
+    let total = 0;
+    $('#itensBody').innerHTML = itens.map((it, i) => {
+      const sub = (it.quantidade || 0) * (it.custo_unitario || 0);
+      total += sub;
+      const p = produtos.find(pr => pr.id === it.produto_id);
+      return `
+        <tr>
+          <td>${p ? p.sku + ' - ' + p.nome : '?'}</td>
+          <td>${it.quantidade}</td>
+          <td class="value-money">${money(it.custo_unitario)}</td>
+          <td class="value-money">${money(sub)}</td>
+          <td><button class="btn-secondary" data-remitem="${i}">x</button></td>
+        </tr>
+      `;
+    }).join('') || '<tr><td colspan="5" class="text-muted">Sem itens ainda.</td></tr>';
+    $('#totalPedido').textContent = money(total);
+    $$('[data-remitem]').forEach(b => b.addEventListener('click', () => { itens.splice(Number(b.dataset.remitem), 1); renderItens(); }));
+  }
+
+  $('#btnNovoPedido').addEventListener('click', () => {
+    $('#formNovoPedido').style.display = 'block';
+    renderItens();
+  });
+  $('#btnCancelarNovo').addEventListener('click', () => {
+    $('#formNovoPedido').style.display = 'none';
+    itens.length = 0;
+  });
+  $('#btnAddItem').addEventListener('click', () => {
+    const opcoes = produtos.map(p => p.sku + ' - ' + p.nome + ' (custo atual: ' + money(p.custo_unitario) + ')').join('\n');
+    const escolhido = prompt('Cole o SKU do produto:\n\n' + opcoes);
+    if (!escolhido) return;
+    const p = produtos.find(pr => pr.sku.toLowerCase() === escolhido.trim().toLowerCase());
+    if (!p) { alert('SKU nao encontrado'); return; }
+    const qtd = Number(prompt('Quantidade:', '1'));
+    if (!qtd || qtd <= 0) return;
+    const custo = Number(prompt('Custo unitario (R$):', String(p.custo_unitario || 280)));
+    if (!custo || custo <= 0) return;
+    itens.push({ produto_id: p.id, quantidade: qtd, custo_unitario: custo });
+    renderItens();
+  });
+  $('#btnSalvarPedido').addEventListener('click', async () => {
+    if (itens.length === 0) { alert('Adicione pelo menos 1 item'); return; }
+    try {
+      await api('api/pedidos-compra', {
+        method: 'POST',
+        body: JSON.stringify({
+          fornecedor_id: Number($('#novoFornecedor').value),
+          data_pedido: $('#novaData').value,
+          observacao: $('#novaObs').value || null,
+          itens,
+        }),
+      });
+      routes.pedidos();
+    } catch (err) { alert('Erro: ' + err.message); }
+  });
+
+  $$('[data-receber]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const pedidoId = btn.dataset.receber;
+      const opcaoTxt = 'Quem buscou?\n1 = Leandro (gratis)\n2 = Rafael Bocao (' + money(custoRafael) + ')\n3 = Outro (informar nome + custo)';
+      const opcao = prompt(opcaoTxt, '2');
+      if (!opcao) return;
+      let coletado_por, coletado_por_nome, custo_coleta;
+      if (opcao === '1') { coletado_por = 'LEANDRO'; }
+      else if (opcao === '2') { coletado_por = 'RAFAEL_BOCAO'; }
+      else if (opcao === '3') {
+        coletado_por = 'OUTRO';
+        coletado_por_nome = prompt('Nome do transportador:');
+        if (!coletado_por_nome) return;
+        custo_coleta = Number(prompt('Custo da coleta (R$):'));
+        if (!custo_coleta && custo_coleta !== 0) return;
+      } else { alert('Opcao invalida'); return; }
+      const dataRec = prompt('Data de recebimento:', new Date().toISOString().slice(0,10));
+      try {
+        const r = await api(`api/pedidos-compra/${pedidoId}/receber`, {
+          method: 'POST',
+          body: JSON.stringify({ coletado_por, coletado_por_nome, custo_coleta, data_recebimento: dataRec }),
+        });
+        alert('Pedido recebido! Estoque atualizado. Custo coleta: ' + money(r.custo_coleta));
+        routes.pedidos();
+      } catch (err) { alert('Erro: ' + err.message); }
+    });
+  });
+};
+
+// ============ INVENTARIO ============
+routes.inventario = async () => {
+  const inventarios = await api('api/inventario');
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h2>Inventario</h2>
+      <div class="actions">
+        <button id="btnNovaContagem" class="btn-primary">Nova contagem</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Contagens (${inventarios.length})</h3>
+      <table>
+        <thead><tr><th>#</th><th>Data</th><th>Feito por</th><th class="text-right">SKUs</th><th class="text-right">Contados</th><th class="text-right">Diferencas</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${inventarios.map(inv => `
+            <tr>
+              <td>#${inv.id}</td>
+              <td>${fmtDate(inv.data_contagem)}</td>
+              <td>${inv.usuario_nome || '-'}</td>
+              <td class="text-right">${inv.total_itens}</td>
+              <td class="text-right">${inv.contados}</td>
+              <td class="text-right">${inv.abs_diferencas || 0}</td>
+              <td><span class="badge ${inv.status === 'finalizado' ? 'ok' : inv.status === 'cancelado' ? 'critico' : 'warn'}">${inv.status}</span></td>
+              <td><button class="btn-secondary" data-abrir="${inv.id}">${inv.status === 'aberto' ? 'Contar' : 'Ver'}</button></td>
+            </tr>
+          `).join('') || '<tr><td colspan="8" class="text-muted">Nenhuma contagem ainda.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  $('#btnNovaContagem').addEventListener('click', async () => {
+    const obs = prompt('Observacao (opcional):', '');
+    try {
+      const r = await api('api/inventario', { method: 'POST', body: JSON.stringify({ observacao: obs || null }) });
+      window.location.hash = '#/inventario/' + r.id;
+    } catch (err) { alert('Erro: ' + err.message); }
+  });
+
+  $$('[data-abrir]').forEach(b => {
+    b.addEventListener('click', () => { window.location.hash = '#/inventario/' + b.dataset.abrir; });
+  });
+};
+
+routes['inventario/:id'] = null; // placeholder; router faz split
+
+// Route handler que trata #/inventario/N
+const _originalRoute = route;
+window.route = function () {
+  const hash = window.location.hash.replace('#/', '') || 'dashboard';
+  if (hash.startsWith('inventario/')) {
+    const id = hash.split('/')[1];
+    $$('.sidebar nav a').forEach(a => a.classList.toggle('active', a.dataset.route === 'inventario'));
+    detalheInventario(Number(id)).catch(err => {
+      $('#content').innerHTML = `<div class="card"><h3>Erro</h3><p>${err.message}</p></div>`;
+    });
+    return;
+  }
+  _originalRoute();
+};
+window.addEventListener('hashchange', window.route);
+
+async function detalheInventario(id) {
+  const inv = await api('api/inventario/' + id);
+  const readonly = inv.status !== 'aberto';
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h2>Inventario #${inv.id} - ${fmtDate(inv.data_contagem)}</h2>
+      <div class="actions">
+        <a href="#/inventario" class="btn-secondary">Voltar</a>
+        ${!readonly ? `<button id="btnFinalizar" class="btn-primary">Finalizar contagem</button>` : ''}
+      </div>
+    </div>
+    <div class="card">
+      <p class="text-muted">Status: <span class="badge ${inv.status === 'finalizado' ? 'ok' : inv.status === 'cancelado' ? 'critico' : 'warn'}">${inv.status}</span> · Feito por: ${inv.usuario_nome || '-'}</p>
+      <p class="text-muted">${inv.observacao || ''}</p>
+      <table>
+        <thead><tr><th>SKU</th><th>Produto</th><th class="text-right">Sistema</th><th class="text-right">Contado</th><th class="text-right">Diferenca</th></tr></thead>
+        <tbody>
+          ${inv.itens.map(it => `
+            <tr>
+              <td><code>${it.sku}</code></td>
+              <td>${it.produto_nome}</td>
+              <td class="text-right value-money">${it.qtd_antes}</td>
+              <td class="text-right">
+                ${readonly
+                  ? (it.qtd_contada != null ? it.qtd_contada : '<span class="text-muted">-</span>')
+                  : `<input type="number" min="0" style="width:80px;text-align:right" value="${it.qtd_contada != null ? it.qtd_contada : ''}" data-item="${it.id}" />`}
+              </td>
+              <td class="text-right value-money ${it.diferenca > 0 ? 'positivo' : it.diferenca < 0 ? 'negativo' : ''}">${it.diferenca != null ? (it.diferenca > 0 ? '+' : '') + it.diferenca : '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  if (!readonly) {
+    $$('[data-item]').forEach(input => {
+      input.addEventListener('change', async () => {
+        const v = Number(input.value);
+        if (isNaN(v) || v < 0) return;
+        try {
+          await api('api/inventario/' + id + '/itens/' + input.dataset.item, {
+            method: 'PATCH',
+            body: JSON.stringify({ qtd_contada: v }),
+          });
+          detalheInventario(id);
+        } catch (err) { alert('Erro: ' + err.message); }
+      });
+    });
+    $('#btnFinalizar').addEventListener('click', async () => {
+      if (!confirm('Finalizar contagem e aplicar ajustes de estoque?')) return;
+      try {
+        const r = await api('api/inventario/' + id + '/finalizar', { method: 'POST' });
+        alert(`Contagem finalizada. ${r.ajustados} SKU(s) ajustado(s) de ${r.total_contados} contado(s).`);
+        detalheInventario(id);
+      } catch (err) { alert('Erro: ' + err.message); }
+    });
+  }
+}
+
+// ============ CONFIG ============
+routes.config = async () => {
+  const cfg = await api('api/config');
+  $('#content').innerHTML = `
+    <div class="page-header"><h2>Configuracoes</h2></div>
+    <div class="card">
+      <h3>Coleta de peças</h3>
+      <div class="form-grid">
+        <label>Custo Rafael Bocao (R$)
+          <input type="number" step="0.01" id="custoRafael" value="${cfg.custo_coleta_rafael_bocao || 110}" />
+        </label>
+        <label>&nbsp;
+          <button id="btnSalvarCfg" class="btn-primary">Salvar</button>
+        </label>
+      </div>
+      <p class="text-muted text-small mt-1">Este valor sera usado por padrao ao receber pedidos com "Rafael Bocao" como transportador.</p>
+    </div>
+  `;
+  $('#btnSalvarCfg').addEventListener('click', async () => {
+    try {
+      await api('api/config/custo_coleta_rafael_bocao', {
+        method: 'PUT',
+        body: JSON.stringify({ value: $('#custoRafael').value }),
+      });
+      alert('Salvo!');
+    } catch (err) { alert('Erro: ' + err.message); }
+  });
+};
+
 boot().catch(err => {
   console.error(err);
   window.location.href = 'login';
