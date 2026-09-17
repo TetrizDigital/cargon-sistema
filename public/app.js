@@ -1098,26 +1098,38 @@ routes.pedidos = async () => {
 
     <div class="card">
       <table>
-        <thead><tr><th>Pedido</th><th>Data</th><th>Fornecedor</th><th class="text-right">Itens</th><th class="text-right">Pecas</th><th class="text-right">Valor</th><th>Status</th><th>Coleta</th><th style="width:200px"></th></tr></thead>
+        <thead><tr><th>Pedido</th><th>Data</th><th>Fornecedor</th><th class="text-right">Peças</th><th class="text-right">Retiradas</th><th class="text-right">Valor</th><th>Status</th><th style="width:220px"></th></tr></thead>
         <tbody>
-          ${pedidos.map(p => `
+          ${pedidos.map(p => {
+            const totalPecas = p.total_pecas || 0;
+            const jaRet = p.ja_retiradas || 0;
+            const falta = totalPecas - jaRet;
+            const datasStr = p.retiradas_datas
+              ? [...new Set(p.retiradas_datas.split(','))].map(d => d.split('-').reverse().slice(0,2).join('/')).join(' · ')
+              : '';
+            return `
             <tr>
               <td><strong>Pedido #${p.id}</strong></td>
               <td>${fmtDate(p.data_pedido)}</td>
               <td>${p.fornecedor_nome}</td>
-              <td class="text-right">${p.itens_count}</td>
-              <td class="text-right">${p.total_pecas || 0}</td>
+              <td class="text-right">
+                <div>${totalPecas} total</div>
+                ${jaRet > 0 ? `<div class="text-small text-muted">${jaRet} retiradas · falta ${falta}</div>` : ''}
+              </td>
+              <td class="text-right text-small">
+                ${p.retiradas_count ? `<strong>${p.retiradas_count}</strong> viagem${p.retiradas_count === 1 ? '' : 's'}` : '<span class="text-muted">-</span>'}
+                ${datasStr ? `<div class="text-muted">${datasStr}</div>` : ''}
+              </td>
               <td class="text-right value-money">${money(p.valor_total)}</td>
               <td>${badgeStatusPedido(p.status)}</td>
-              <td class="text-small">${p.coletado_por ? (p.coletado_por === 'RAFAEL_BOCAO' ? 'Rafael Bocao' : p.coletado_por === 'LEANDRO' ? 'Leandro' : (p.coletado_por_nome || 'Outro')) + (p.custo_coleta > 0 ? ' · ' + money(p.custo_coleta) : '') : '-'}</td>
               <td>
                 <button class="btn-secondary" data-abrir="${p.id}">Abrir</button>
                 ${p.status === 'aberto' ? `<button class="btn-secondary" data-fechar="${p.id}">Fechar</button>` : ''}
                 ${p.status === 'fechado' ? `<button class="btn-secondary" data-reabrir="${p.id}">Reabrir</button>` : ''}
-                ${['aberto', 'fechado'].includes(p.status) ? `<button class="btn-primary" data-receber="${p.id}">Receber</button>` : ''}
+                ${['aberto', 'fechado'].includes(p.status) ? `<button class="btn-primary" data-receber="${p.id}">Finalizar</button>` : ''}
               </td>
             </tr>
-          `).join('') || '<tr><td colspan="9" class="text-muted">Nenhum pedido ainda.</td></tr>'}
+          `;}).join('') || '<tr><td colspan="8" class="text-muted">Nenhum pedido ainda.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1262,17 +1274,28 @@ async function renderPedidoDetalhe(id) {
             if (jaRec === 0) { statusIcon = '⚪'; statusLabel = 'Aguardando'; statusClass = 'warn'; }
             else if (jaRec >= it.quantidade) { statusIcon = '🟢'; statusLabel = 'Retirado'; statusClass = 'ok'; }
             else { statusIcon = '🟡'; statusLabel = 'Parcial'; statusClass = 'warn'; }
+
+            // Breakdown de quando cada unidade foi retirada (por retirada)
+            const retirasDoItem = (pedido.retiradas || [])
+              .map(r => {
+                const ri = (r.itens || []).find(x => x.item_id === it.id);
+                return ri ? { data: r.data_retirada, qtd: ri.quantidade } : null;
+              })
+              .filter(Boolean);
+            const breakdown = retirasDoItem.length > 0
+              ? retirasDoItem.map(r => `${r.qtd} em ${fmtDate(r.data).slice(0,5)}`).join(' + ')
+              : '';
+
             return `
-            <tr ${jaRec >= it.quantidade ? 'style="opacity:0.6"' : ''}>
+            <tr ${jaRec >= it.quantidade ? 'style="opacity:0.7"' : ''}>
               <td><span class="badge ${statusClass}">${statusIcon} ${statusLabel}</span></td>
               <td>${it.sku ? `<code>${it.sku}</code> ` : ''}${it.produto_nome}</td>
               <td class="text-right">
                 ${editavel ? `<input type="number" min="1" style="width:70px;text-align:right" value="${it.quantidade}" data-item="${it.id}" data-field="quantidade" />` : it.quantidade}
               </td>
               <td class="text-right" style="white-space:nowrap">
-                ${editavel ? `<input type="number" min="0" max="${it.quantidade}" style="width:60px;text-align:right" value="${jaRec}" data-item="${it.id}" data-jarec="1" title="Quantidade ja retirada antes" />
-                <button class="btn-secondary" style="padding:2px 6px;font-size:.75rem;margin-left:4px" data-tudo="${it.id}" data-qtd="${it.quantidade}" title="Marcar tudo como retirado">✓ tudo</button>
-                ${jaRec > 0 ? `<button class="btn-secondary" style="padding:2px 6px;font-size:.75rem;margin-left:2px" data-zerar="${it.id}" title="Zerar retirada">↺</button>` : ''}` : jaRec}
+                <div><strong>${jaRec}</strong> retiradas</div>
+                ${breakdown ? `<div class="text-small text-muted">${breakdown}</div>` : ''}
               </td>
               <td class="text-right ${aReceber === 0 ? 'text-muted' : 'value-money'}">${aReceber}</td>
               <td class="text-right">

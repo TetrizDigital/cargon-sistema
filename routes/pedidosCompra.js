@@ -38,12 +38,25 @@ router.get('/', (req, res) => {
   const rows = db.prepare(`
     SELECT pc.*, f.nome AS fornecedor_nome,
       (SELECT COUNT(*) FROM pedidos_compra_itens WHERE pedido_id = pc.id) AS itens_count,
-      (SELECT SUM(quantidade) FROM pedidos_compra_itens WHERE pedido_id = pc.id) AS total_pecas
+      (SELECT SUM(quantidade) FROM pedidos_compra_itens WHERE pedido_id = pc.id) AS total_pecas,
+      (SELECT COALESCE(SUM(qtd_ja_recebida), 0) FROM pedidos_compra_itens WHERE pedido_id = pc.id) AS ja_retiradas,
+      (SELECT COUNT(*) FROM pedidos_compra_retiradas WHERE pedido_id = pc.id) AS retiradas_count
     FROM pedidos_compra pc
     JOIN fornecedores f ON f.id = pc.fornecedor_id
     ${cond}
     ORDER BY pc.data_pedido DESC, pc.id DESC
   `).all(...(status ? [status] : []));
+
+  // Lista datas de retiradas por pedido
+  const retiradasPorPedido = db.prepare(`
+    SELECT pedido_id, GROUP_CONCAT(date(data_retirada), ',') AS datas
+    FROM pedidos_compra_retiradas
+    GROUP BY pedido_id
+  `).all();
+  const mapDatas = {};
+  for (const r of retiradasPorPedido) mapDatas[r.pedido_id] = r.datas;
+  for (const p of rows) p.retiradas_datas = mapDatas[p.id] || '';
+
   res.json(rows);
 });
 
