@@ -1104,13 +1104,20 @@ async function renderPedidoDetalhe(id) {
     <div class="card">
       <h3>Itens (${pedido.itens.length})</h3>
       <table>
-        <thead><tr><th>Produto</th><th class="text-right">Qtd</th><th class="text-right">Custo unit.</th><th class="text-right">Subtotal</th><th></th></tr></thead>
+        <thead><tr><th>Produto</th><th class="text-right">Qtd</th><th class="text-right">Ja retirado</th><th class="text-right">Custo unit.</th><th class="text-right">Subtotal</th><th></th></tr></thead>
         <tbody>
-          ${pedido.itens.map(it => `
+          ${pedido.itens.map(it => {
+            const jaRec = it.qtd_ja_recebida || 0;
+            const aReceber = it.quantidade - jaRec;
+            return `
             <tr>
               <td>${it.sku ? `<code>${it.sku}</code> ` : ''}${it.produto_nome}</td>
               <td class="text-right">
                 ${editavel ? `<input type="number" min="1" style="width:70px;text-align:right" value="${it.quantidade}" data-item="${it.id}" data-field="quantidade" />` : it.quantidade}
+              </td>
+              <td class="text-right">
+                ${editavel ? `<input type="number" min="0" max="${it.quantidade}" style="width:60px;text-align:right" value="${jaRec}" data-item="${it.id}" data-jarec="1" title="Quantidade ja retirada antes (nao vai somar no estoque ao Receber)" />` : jaRec}
+                ${jaRec > 0 ? `<div class="text-small text-muted">falta ${aReceber}</div>` : ''}
               </td>
               <td class="text-right">
                 ${editavel ? `<input type="number" step="0.01" style="width:100px;text-align:right" value="${it.custo_unitario}" data-item="${it.id}" data-field="custo_unitario" />` : money(it.custo_unitario)}
@@ -1118,11 +1125,12 @@ async function renderPedidoDetalhe(id) {
               <td class="text-right value-money">${money(it.quantidade * it.custo_unitario)}</td>
               <td>${editavel ? `<button class="btn-secondary" data-remitem="${it.id}">x</button>` : ''}</td>
             </tr>
-          `).join('') || '<tr><td colspan="5" class="text-muted">Sem itens.</td></tr>'}
+          `;}).join('') || '<tr><td colspan="6" class="text-muted">Sem itens.</td></tr>'}
         </tbody>
         <tfoot>
           <tr style="font-weight:700;border-top:2px solid var(--cinza-2)">
-            <td>${pedido.itens.reduce((s, it) => s + it.quantidade, 0)} pecas</td>
+            <td>${pedido.itens.reduce((s, it) => s + it.quantidade, 0)} pecas total</td>
+            <td class="text-right text-small text-muted">a receber: ${pedido.itens.reduce((s, it) => s + (it.quantidade - (it.qtd_ja_recebida||0)), 0)}</td>
             <td colspan="2"></td>
             <td class="text-right value-money">${money(pedido.valor_total)}</td>
             <td></td>
@@ -1206,6 +1214,20 @@ async function renderPedidoDetalhe(id) {
           await api(`api/pedidos-compra/${id}/itens/${itemId}`, {
             method: 'PATCH',
             body: JSON.stringify({ [field]: value }),
+          });
+          renderPedidoDetalhe(id);
+        } catch (err) { alert('Erro: ' + err.message); }
+      });
+    });
+
+    $$('[data-item][data-jarec]').forEach(input => {
+      input.addEventListener('change', async () => {
+        const itemId = input.dataset.item;
+        const v = Number(input.value);
+        try {
+          await api(`api/pedidos-compra/${id}/itens/${itemId}/ja-recebida`, {
+            method: 'PATCH',
+            body: JSON.stringify({ qtd_ja_recebida: v }),
           });
           renderPedidoDetalhe(id);
         } catch (err) { alert('Erro: ' + err.message); }

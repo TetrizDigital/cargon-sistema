@@ -291,22 +291,25 @@ router.post('/:id/receber', (req, res) => {
       WHERE id = ?
     `).run(dataRec, coletado_por, coletado_por_nome || null, coleta_final, observacao || null, id);
 
-    // Rateio do frete de coleta entre as peças (quando coleta_final > 0)
-    const totalPecas = itens.reduce((s, it) => s + it.quantidade, 0);
+    // Rateio do frete de coleta apenas sobre peças a receber (nao retiradas antes)
+    const itensEfetivos = itens.map(it => ({ ...it, qtd_efetiva: it.quantidade - (it.qtd_ja_recebida || 0) }));
+    const totalPecas = itensEfetivos.reduce((s, it) => s + Math.max(0, it.qtd_efetiva), 0);
     const rateioPorPeca = (coleta_final > 0 && totalPecas > 0) ? (coleta_final / totalPecas) : 0;
 
-    // Entrada de estoque + atualiza custo (custo unitario absorve o rateio do frete)
-    for (const it of itens) {
-      const novoSaldo = it.estoque_atual + it.quantidade;
+    // Entrada de estoque + atualiza custo (soma quantidade - qtd_ja_recebida)
+    for (const it of itensEfetivos) {
+      if (it.qtd_efetiva <= 0) continue; // ja foi contado no baseline
+      const novoSaldo = it.estoque_atual + it.qtd_efetiva;
       const custoComRateio = Number(it.custo_unitario) + rateioPorPeca;
       db.prepare(`UPDATE produtos SET estoque_atual = ?, custo_unitario = ?, atualizado_em = datetime('now') WHERE id = ?`)
         .run(novoSaldo, custoComRateio, it.produto_id);
 
       const obsRateio = rateioPorPeca > 0 ? ' (+ R$' + rateioPorPeca.toFixed(2) + ' rateio frete)' : '';
+      const obsPre = (it.qtd_ja_recebida || 0) > 0 ? ' (' + it.qtd_ja_recebida + ' ja retirado antes)' : '';
       db.prepare(`
         INSERT INTO movimentos_estoque (produto_id, tipo, quantidade, saldo_apos, referencia_tipo, referencia_id, observacao, criado_por)
         VALUES (?, 'ENTRADA_COMPRA', ?, ?, 'pedido_compra', ?, ?, ?)
-      `).run(it.produto_id, it.quantidade, novoSaldo, id, 'Pedido #' + id + obsRateio, req.session.userId);
+      `).run(it.produto_id, it.qtd_efetiva, novoSaldo, id, 'Pedido #' + id + obsRateio + obsPre, req.session.userId);
     }
 
     // Lancamento no caixa: compra fornecedor
@@ -345,6 +348,21 @@ router.post('/:id/cancelar', (req, res) => {
   if (!p) return res.status(404).json({ error: 'nao encontrado' });
   if (p.status !== 'aberto') return res.status(400).json({ error: 'so pedidos abertos podem ser cancelados' });
   db.prepare(`UPDATE pedidos_compra SET status = 'cancelado' WHERE id = ?`).run(id);
+  res.json({ ok: true });
+});
+
+// Marca item como parcialmente recebido antes (nao afeta estoque, so registra que X ja foi contabilizado)
+router.patch('/:id/itens/:itemId/ja-recebida', (req, res) => {
+  const id = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  const { qtd_ja_recebida } = req.body || {};
+  if (qtd_ja_recebida == null || qtd_ja_recebida < 0) return res.status(400).json({ error: 'qtd_ja_recebida invalida' });
+
+  const it = db.prepare('SELECT quantidade FROM pedidos_compra_itens WHERE id = ? AND pedido_id = ?').get(itemId, id);
+  if (!it) return res.status(404).json({ error: 'item nao encontrado' });
+  if (qtd_ja_recebida > it.quantidade) return res.status(400).json({ error: 'nao pode ser maior que a quantidade' });
+
+  db.prepare('UPDATE pedidos_compra_itens SET qtd_ja_recebida = ? WHERE id = ? AND pedido_id = ?').run(qtd_ja_recebida, itemId, id);
   res.json({ ok: true });
 });
 

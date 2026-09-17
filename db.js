@@ -206,6 +206,7 @@ addColumn('vendas', 'payment_method',        'TEXT');                       // p
 addColumn('vendas', 'taxa_detalhes',         'TEXT');                       // JSON com detalhes brutos (fee_details, etc)
 addColumn('produto_vinculos', 'qtd_anunciada',           'INTEGER');        // estoque publicado no canal (para comparar com real)
 addColumn('produto_vinculos', 'qtd_anunciada_atualizado', 'TEXT');           // quando foi lida do canal
+addColumn('pedidos_compra_itens', 'qtd_ja_recebida',    'INTEGER NOT NULL DEFAULT 0'); // retirada antecipada ja no baseline
 
 // -------- Tabelas de pedidos de compra e inventario --------
 db.exec(`
