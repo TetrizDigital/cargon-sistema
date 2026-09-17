@@ -440,50 +440,182 @@ routes.vendas = async () => {
 
 // ============ FINANCEIRO ============
 routes.financeiro = async () => {
-  const resumo = await api('api/financeiro/resumo');
-  const lancamentos = await api('api/financeiro/lancamentos');
+  const per = periodoDoMes(DASHBOARD_STATE.offset);
+  const qs = `?de=${per.de}&ate=${per.ate}`;
+
+  const [resumo, adsResumo, lancamentos] = await Promise.all([
+    api('api/financeiro/resumo' + qs),
+    api('api/ads/resumo' + qs).catch(() => ({ totais: { gasto_total: 0 } })),
+    api('api/financeiro/lancamentos' + qs),
+  ]);
+
+  const v = resumo.vendas || { totais: {}, cmv: 0, lucro_bruto: 0, por_canal: [] };
+  const t = v.totais || {};
+  const adsGasto = (adsResumo.totais || {}).gasto_total || 0;
+
+  // Breakdown automatico
+  const entradaVendas = t.receita_liquida || 0; // vendas ja liquidas do fee ML e frete
+  const outrasReceitas = resumo.entradas || 0;   // lancamentos manuais de entrada
+  const saidaTaxasML = t.taxas_ml || 0;
+  const saidaFreteVendas = t.frete_pago || 0;
+  const saidaCMV = v.cmv || 0;
+  const saidaAds = adsGasto;
+  const saidasManuais = resumo.saidas || 0;      // inclui compra fornecedor, frete coleta, custos fixos
+
+  const totalEntradas = entradaVendas + outrasReceitas;
+  // saidasManuais ja inclui Ads (via lancamentos automaticos), Bocao (frete coleta), Oliver e custos fixos
+  const totalSaidas = saidasManuais + saidaCMV; // CMV nao esta em lancamentos, adicionar
+  const lucroLiquido = totalEntradas - totalSaidas;
+
   $('#content').innerHTML = `
-    <div class="page-header"><h2>Financeiro</h2></div>
+    <div class="page-header">
+      <h2>Financeiro</h2>
+      <div class="actions" style="display:flex;gap:.5rem;align-items:center">
+        <button id="btnPrevMes" class="btn-secondary">‹</button>
+        <span style="min-width:180px;text-align:center;font-weight:600;text-transform:capitalize">${per.label}</span>
+        <button id="btnNextMes" class="btn-secondary" ${DASHBOARD_STATE.offset >= 0 ? 'disabled' : ''}>›</button>
+        <button id="btnMesAtual" class="btn-secondary" style="margin-left:.5rem">Mes atual</button>
+      </div>
+    </div>
+
     <div class="kpi-grid">
-      <div class="kpi ok"><div class="kpi-label">Entradas</div><div class="kpi-value">${money(resumo.entradas)}</div></div>
-      <div class="kpi warn"><div class="kpi-label">Saidas</div><div class="kpi-value">${money(resumo.saidas)}</div></div>
-      <div class="kpi ${resumo.saldo >= 0 ? 'ok' : 'warn'}"><div class="kpi-label">Saldo do mes</div><div class="kpi-value">${money(resumo.saldo)}</div></div>
+      <div class="kpi ok">
+        <div class="kpi-label">Total de entradas</div>
+        <div class="kpi-value">${money(totalEntradas)}</div>
+        <div class="kpi-sub">vendas liquidas + manuais</div>
+      </div>
+      <div class="kpi warn">
+        <div class="kpi-label">Total de saidas</div>
+        <div class="kpi-value">${money(totalSaidas)}</div>
+        <div class="kpi-sub">ads + compras + custos fixos</div>
+      </div>
+      <div class="kpi ${lucroLiquido >= 0 ? 'ok' : 'warn'}">
+        <div class="kpi-label">Lucro liquido do mes</div>
+        <div class="kpi-value">${money(lucroLiquido)}</div>
+        <div class="kpi-sub">entradas − saidas</div>
+      </div>
     </div>
-    <div class="card">
-      <h3>Novo lancamento</h3>
-      <form id="formLanc" class="form-grid">
-        <label>Tipo <select name="tipo" required><option value="ENTRADA">Entrada</option><option value="SAIDA">Saida</option></select></label>
-        <label>Categoria <select name="categoria" required>
-          <option>VENDA</option><option>TAXA_CANAL</option><option>FRETE</option>
-          <option>COMPRA_FORNECEDOR</option><option>IMPOSTO</option><option>CUSTO_FIXO</option>
-          <option>OUTRA_RECEITA</option><option>OUTRA_DESPESA</option>
-        </select></label>
-        <label>Descricao <input name="descricao" required /></label>
-        <label>Valor <input name="valor" type="number" step="0.01" required /></label>
-        <label>Data <input name="data" type="date" required value="${new Date().toISOString().slice(0,10)}" /></label>
-        <label>&nbsp;<button type="submit" class="btn-primary">Lancar</button></label>
-      </form>
-    </div>
-    <div class="card">
-      <h3>Lancamentos</h3>
-      <table>
-        <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descricao</th><th>Status</th><th class="text-right">Valor</th></tr></thead>
-        <tbody>
-          ${lancamentos.map(l => `
+
+    <details class="accordion" open>
+      <summary>
+        <span>📥 Entradas — breakdown</span>
+        <span class="summary-info">${money(totalEntradas)}</span>
+      </summary>
+      <div class="accordion-body">
+        <table>
+          <thead><tr><th>Origem</th><th>Descricao</th><th class="text-right">Valor</th></tr></thead>
+          <tbody>
+            ${v.por_canal.map(c => `
+              <tr>
+                <td><span class="badge ${badgeCanal(c.canal)}">${labelCanal(c.canal)}</span></td>
+                <td class="text-small">${c.qtd_vendas} vendas · bruto ${money(c.receita_bruta)} − taxas ${money(c.taxas_ml)} − frete ${money(c.frete_pago)}</td>
+                <td class="text-right value-money positivo">${money(c.receita_liquida)}</td>
+              </tr>
+            `).join('')}
             <tr>
-              <td>${fmtDate(l.data)}</td>
-              <td>${l.tipo}</td>
-              <td>${l.categoria}</td>
-              <td>${l.descricao}</td>
-              <td>${l.status}</td>
-              <td class="text-right value-money ${l.tipo === 'SAIDA' ? 'negativo' : 'positivo'}">${l.tipo === 'SAIDA' ? '-' : '+'}${money(l.valor)}</td>
+              <td>Outras receitas</td>
+              <td class="text-small text-muted">lancamentos manuais (${resumo.entradas > 0 ? 'realizadas' : 'nenhuma'})</td>
+              <td class="text-right value-money positivo">${money(outrasReceitas)}</td>
             </tr>
-          `).join('') || '<tr><td colspan="6" class="text-muted">Sem lancamentos.</td></tr>'}
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+          <tfoot>
+            <tr style="font-weight:700;border-top:2px solid var(--cinza-2)">
+              <td colspan="2">Total entradas</td>
+              <td class="text-right value-money positivo">${money(totalEntradas)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </details>
+
+    <details class="accordion" open>
+      <summary>
+        <span>📤 Saidas — breakdown</span>
+        <span class="summary-info">${money(totalSaidas)}</span>
+      </summary>
+      <div class="accordion-body">
+        <div class="text-small text-muted mb-1">
+          Taxas ML (${money(saidaTaxasML)}) e Frete de vendas (${money(saidaFreteVendas)}) ja estao descontados dentro do liquido das vendas.
+          CMV (${money(saidaCMV)}) e' o custo dos produtos vendidos no mes, adicionado abaixo.
+        </div>
+        <table>
+          <thead><tr><th>Categoria</th><th>Descricao</th><th class="text-right">Valor</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>CMV (custo produtos vendidos)</td>
+              <td class="text-small">${t.qtd || 0} vendas × custo unitario</td>
+              <td class="text-right value-money negativo">${money(saidaCMV)}</td>
+            </tr>
+            ${resumo.por_categoria.filter(pc => pc.tipo === 'SAIDA').map(pc => `
+              <tr>
+                <td>${pc.categoria === 'OUTRA_DESPESA' ? 'Mercado Ads + outros' : pc.categoria}</td>
+                <td class="text-small">${pc.qtd} lancamento${pc.qtd === 1 ? '' : 's'}</td>
+                <td class="text-right value-money negativo">${money(pc.total)}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="3" class="text-muted">Sem lancamentos.</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr style="font-weight:700;border-top:2px solid var(--cinza-2)">
+              <td colspan="2">Total saidas</td>
+              <td class="text-right value-money negativo">${money(totalSaidas)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </details>
+
+    <details class="accordion">
+      <summary>
+        <span>💵 Novo lancamento manual</span>
+        <span class="summary-info">clique para expandir</span>
+      </summary>
+      <div class="accordion-body">
+        <form id="formLanc" class="form-grid">
+          <label>Tipo <select name="tipo" required><option value="ENTRADA">Entrada</option><option value="SAIDA">Saida</option></select></label>
+          <label>Categoria <select name="categoria" required>
+            <option>VENDA</option><option>TAXA_CANAL</option><option>FRETE</option>
+            <option>COMPRA_FORNECEDOR</option><option>IMPOSTO</option><option>CUSTO_FIXO</option>
+            <option>OUTRA_RECEITA</option><option>OUTRA_DESPESA</option>
+          </select></label>
+          <label>Descricao <input name="descricao" required /></label>
+          <label>Valor <input name="valor" type="number" step="0.01" required /></label>
+          <label>Data <input name="data" type="date" required value="${new Date().toISOString().slice(0,10)}" /></label>
+          <label>&nbsp;<button type="submit" class="btn-primary">Lancar</button></label>
+        </form>
+      </div>
+    </details>
+
+    <details class="accordion" open>
+      <summary>
+        <span>📋 Lancamentos do mes</span>
+        <span class="summary-info">${lancamentos.length} lancamentos</span>
+      </summary>
+      <div class="accordion-body">
+        <table>
+          <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descricao</th><th>Status</th><th class="text-right">Valor</th></tr></thead>
+          <tbody>
+            ${lancamentos.map(l => `
+              <tr>
+                <td>${fmtDate(l.data)}</td>
+                <td>${l.tipo}</td>
+                <td>${l.categoria}</td>
+                <td>${l.descricao}</td>
+                <td>${l.status}</td>
+                <td class="text-right value-money ${l.tipo === 'SAIDA' ? 'negativo' : 'positivo'}">${l.tipo === 'SAIDA' ? '-' : '+'}${money(l.valor)}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-muted">Sem lancamentos manuais no periodo.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </details>
   `;
-  $('#formLanc').addEventListener('submit', async (e) => {
+  $('#btnPrevMes').addEventListener('click', () => { DASHBOARD_STATE.offset--; routes.financeiro(); });
+  $('#btnNextMes').addEventListener('click', () => {
+    if (DASHBOARD_STATE.offset < 0) { DASHBOARD_STATE.offset++; routes.financeiro(); }
+  });
+  $('#btnMesAtual').addEventListener('click', () => { DASHBOARD_STATE.offset = 0; routes.financeiro(); });
+  const formEl = $('#formLanc');
+  if (formEl) formEl.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const body = Object.fromEntries(fd);

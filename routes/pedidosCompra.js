@@ -181,16 +181,22 @@ router.post('/:id/receber', (req, res) => {
       WHERE id = ?
     `).run(dataRec, coletado_por, coletado_por_nome || null, coleta_final, observacao || null, id);
 
-    // Entrada de estoque + atualiza custo
+    // Rateio do frete de coleta entre as peças (quando coleta_final > 0)
+    const totalPecas = itens.reduce((s, it) => s + it.quantidade, 0);
+    const rateioPorPeca = (coleta_final > 0 && totalPecas > 0) ? (coleta_final / totalPecas) : 0;
+
+    // Entrada de estoque + atualiza custo (custo unitario absorve o rateio do frete)
     for (const it of itens) {
       const novoSaldo = it.estoque_atual + it.quantidade;
+      const custoComRateio = Number(it.custo_unitario) + rateioPorPeca;
       db.prepare(`UPDATE produtos SET estoque_atual = ?, custo_unitario = ?, atualizado_em = datetime('now') WHERE id = ?`)
-        .run(novoSaldo, it.custo_unitario, it.produto_id);
+        .run(novoSaldo, custoComRateio, it.produto_id);
 
+      const obsRateio = rateioPorPeca > 0 ? ' (+ R$' + rateioPorPeca.toFixed(2) + ' rateio frete)' : '';
       db.prepare(`
         INSERT INTO movimentos_estoque (produto_id, tipo, quantidade, saldo_apos, referencia_tipo, referencia_id, observacao, criado_por)
         VALUES (?, 'ENTRADA_COMPRA', ?, ?, 'pedido_compra', ?, ?, ?)
-      `).run(it.produto_id, it.quantidade, novoSaldo, id, 'Pedido #' + id, req.session.userId);
+      `).run(it.produto_id, it.quantidade, novoSaldo, id, 'Pedido #' + id + obsRateio, req.session.userId);
     }
 
     // Lancamento no caixa: compra fornecedor
