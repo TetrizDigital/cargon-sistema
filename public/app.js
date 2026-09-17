@@ -341,15 +341,14 @@ routes.produtos = async () => {
   $('#content').innerHTML = `
     <div class="page-header">
       <h2>Produtos (${produtos.length})</h2>
-      <div class="actions">
+      <div class="actions" style="display:flex;gap:.5rem">
         <input id="filtroProdutos" placeholder="Buscar por nome, SKU ou modelo..." style="width: 300px" />
+        <button id="btnNovoProduto" class="btn-primary">+ Novo produto</button>
       </div>
     </div>
     <div class="card">
       <div class="text-small text-muted mb-1">
-        <strong>Estoque real</strong> = o que voce tem fisicamente (fonte da verdade da Cargon).
-        <strong>Anunciado ML</strong> = o que esta publicado nos anuncios (voce infla pra vender mais).
-        <strong>Diferenca</strong> = quantas voce precisa buscar rapido no Oliver se vender.
+        <strong>Estoque real</strong> = fisicamente na Cargon (fonte da verdade). <strong>Anunciado ML</strong> = publicado (inflado). <strong>Clique no SKU/nome</strong> para editar produto + vinculos.
       </div>
       <table>
         <thead>
@@ -372,7 +371,14 @@ routes.produtos = async () => {
     $('#produtosBody').innerHTML = produtos
       .filter(p => !q || (p.nome + ' ' + p.sku + ' ' + (p.modelo || '')).toLowerCase().includes(q))
       .map(rowProduto).join('');
+    bindProdutosClicks();
   });
+  $('#btnNovoProduto').addEventListener('click', () => openProdutoModal(null));
+  bindProdutosClicks();
+
+  function bindProdutosClicks() {
+    $$('[data-editproduto]').forEach(el => el.addEventListener('click', () => openProdutoModal(Number(el.dataset.editproduto))));
+  }
 };
 function rowProduto(p) {
   const status = p.estoque_atual <= 0 ? 'critico' : (p.estoque_atual <= p.estoque_minimo ? 'warn' : 'ok');
@@ -380,7 +386,7 @@ function rowProduto(p) {
   const anunciado = p.total_anunciado_ml || 0;
   const diff = anunciado - p.estoque_atual;
   return `
-    <tr>
+    <tr style="cursor:pointer" data-editproduto="${p.id}">
       <td><code>${p.sku}</code></td>
       <td>${p.nome}</td>
       <td class="value-money">${money(p.custo_unitario)}</td>
@@ -392,6 +398,132 @@ function rowProduto(p) {
       <td><span class="badge ${status}">${statusLabel}</span></td>
     </tr>
   `;
+}
+
+async function openProdutoModal(produtoId) {
+  const isEdit = produtoId != null;
+  const produto = isEdit ? await api('api/produtos/' + produtoId) : {
+    sku: '', nome: '', modelo: '', ano_de: '', ano_ate: '',
+    custo_unitario: 280, preco_venda: 949, frete_estimado: 60,
+    estoque_atual: 0, estoque_minimo: 1, observacao: '',
+    vinculos: [],
+  };
+
+  const container = document.createElement('div');
+  container.className = 'card';
+  container.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;min-width:700px;max-width:92vw;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3)';
+  container.innerHTML = `
+    <h3>${isEdit ? 'Editar' : 'Novo'} produto${isEdit ? ' — ' + produto.sku : ''}</h3>
+
+    <div class="form-grid">
+      <label>SKU <input id="prSku" value="${produto.sku}" ${isEdit ? 'readonly title="SKU nao pode ser alterado"' : 'required'} /></label>
+      <label>Nome completo <input id="prNome" value="${produto.nome}" required style="min-width:300px" /></label>
+      <label>Modelo <input id="prModelo" value="${produto.modelo || ''}" placeholder="ex: Hilux CD" /></label>
+      <label>Ano de <input id="prAnoDe" value="${produto.ano_de || ''}" placeholder="2016" /></label>
+      <label>Ano ate <input id="prAnoAte" value="${produto.ano_ate || ''}" placeholder="2026" /></label>
+      <label>Custo unitario (R$) <input id="prCusto" type="number" step="0.01" value="${produto.custo_unitario}" /></label>
+      <label>Preco de venda (R$) <input id="prPreco" type="number" step="0.01" value="${produto.preco_venda}" /></label>
+      <label>Frete estimado (R$) <input id="prFrete" type="number" step="0.01" value="${produto.frete_estimado || 0}" /></label>
+      ${!isEdit ? `<label>Estoque inicial <input id="prEstoque" type="number" min="0" value="${produto.estoque_atual}" /></label>` : ''}
+      <label>Estoque minimo (alerta) <input id="prMinimo" type="number" min="0" value="${produto.estoque_minimo}" /></label>
+      ${isEdit ? `<label>Ativo <select id="prAtivo"><option value="1" ${produto.ativo ? 'selected' : ''}>Sim</option><option value="0" ${!produto.ativo ? 'selected' : ''}>Nao</option></select></label>` : ''}
+    </div>
+
+    <label class="mt-1" style="display:block">Observacao <textarea id="prObs" style="width:100%;min-height:60px">${produto.observacao || ''}</textarea></label>
+
+    ${isEdit ? `
+    <h4 class="mt-1">Vinculos com canais (MLB, Site, TikTok...)</h4>
+    <div class="text-small text-muted mb-1">Cada vinculo linka esse produto ao ID do anuncio em um canal. Uma venda vinculada baixa o estoque real desse produto automaticamente.</div>
+    <table id="vinculosTable">
+      <thead><tr><th>Canal</th><th>ID externo</th><th class="text-right">Anunciado</th><th></th></tr></thead>
+      <tbody>
+        ${(produto.vinculos || []).map(v => `
+          <tr>
+            <td><span class="badge ${badgeCanal(v.canal)}">${labelCanal(v.canal)}</span></td>
+            <td><code>${v.id_externo}</code></td>
+            <td class="text-right text-muted">${v.qtd_anunciada || '-'}</td>
+            <td><button class="btn-secondary" data-remvinculo="${v.id}">x</button></td>
+          </tr>
+        `).join('') || '<tr><td colspan="4" class="text-muted">Sem vinculos ainda.</td></tr>'}
+      </tbody>
+    </table>
+    <div class="form-grid mt-1" style="grid-template-columns:1fr 2fr auto">
+      <select id="prNovoVinCanal">
+        <option value="MERCADO_LIVRE">Mercado Livre</option>
+        <option value="SITE_PROPRIO">Site Cargon</option>
+        <option value="TIKTOK_SHOP">TikTok Shop</option>
+        <option value="SHOPEE">Shopee</option>
+        <option value="AMAZON">Amazon</option>
+      </select>
+      <input id="prNovoVinId" placeholder="ID no canal (ex: MLB1234567890)" />
+      <button class="btn-secondary" id="prAddVinculo">+ Adicionar</button>
+    </div>
+    ` : ''}
+
+    <div class="mt-1" style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button class="btn-secondary" id="prCancel">Cancelar</button>
+      <button class="btn-primary" id="prSalvar">${isEdit ? 'Salvar alteracoes' : 'Criar produto'}</button>
+    </div>
+  `;
+  document.body.appendChild(container);
+  const back = document.createElement('div');
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:99';
+  document.body.appendChild(back);
+  const fechar = () => { container.remove(); back.remove(); };
+  back.addEventListener('click', fechar);
+  container.querySelector('#prCancel').addEventListener('click', fechar);
+
+  container.querySelector('#prSalvar').addEventListener('click', async () => {
+    const body = {
+      sku: container.querySelector('#prSku').value.trim(),
+      nome: container.querySelector('#prNome').value.trim(),
+      modelo: container.querySelector('#prModelo').value.trim() || null,
+      ano_de: container.querySelector('#prAnoDe').value.trim() || null,
+      ano_ate: container.querySelector('#prAnoAte').value.trim() || null,
+      custo_unitario: Number(container.querySelector('#prCusto').value),
+      preco_venda: Number(container.querySelector('#prPreco').value),
+      frete_estimado: Number(container.querySelector('#prFrete').value),
+      estoque_minimo: Number(container.querySelector('#prMinimo').value),
+      observacao: container.querySelector('#prObs').value || null,
+    };
+    if (!isEdit) body.estoque_atual = Number(container.querySelector('#prEstoque').value);
+    if (isEdit) body.ativo = Number(container.querySelector('#prAtivo').value);
+
+    if (!body.sku || !body.nome) { alert('SKU e nome sao obrigatorios'); return; }
+    try {
+      if (isEdit) {
+        await api('api/produtos/' + produtoId, { method: 'PUT', body: JSON.stringify(body) });
+      } else {
+        await api('api/produtos', { method: 'POST', body: JSON.stringify(body) });
+      }
+      fechar();
+      routes.produtos();
+    } catch (err) { alert('Erro: ' + err.message); }
+  });
+
+  if (isEdit) {
+    container.querySelector('#prAddVinculo').addEventListener('click', async () => {
+      const canal = container.querySelector('#prNovoVinCanal').value;
+      const id_externo = container.querySelector('#prNovoVinId').value.trim();
+      if (!id_externo) { alert('Informe o ID externo'); return; }
+      try {
+        await api(`api/produtos/${produtoId}/vinculos`, {
+          method: 'POST',
+          body: JSON.stringify({ canal, id_externo }),
+        });
+        fechar();
+        openProdutoModal(produtoId); // reabre atualizado
+      } catch (err) { alert('Erro: ' + err.message); }
+    });
+    container.querySelectorAll('[data-remvinculo]').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('Remover este vinculo?')) return;
+      try {
+        await api(`api/produtos/vinculos/${b.dataset.remvinculo}`, { method: 'DELETE' });
+        fechar();
+        openProdutoModal(produtoId);
+      } catch (err) { alert('Erro: ' + err.message); }
+    }));
+  }
 }
 
 // ============ ESTOQUE ============
