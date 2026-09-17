@@ -1113,39 +1113,60 @@ async function renderPedidoDetalhe(id) {
     <div class="card">
       <h3>Itens (${pedido.itens.length})</h3>
       <table>
-        <thead><tr><th>Produto</th><th class="text-right">Qtd</th><th class="text-right">Ja retirado</th><th class="text-right">Custo unit.</th><th class="text-right">Subtotal</th><th></th></tr></thead>
+        <thead><tr>
+          <th>Status</th><th>Produto</th>
+          <th class="text-right">Qtd total</th>
+          <th class="text-right">Ja retirado</th>
+          <th class="text-right">Falta</th>
+          <th class="text-right">Custo unit.</th>
+          <th class="text-right">Subtotal</th>
+          <th></th>
+        </tr></thead>
         <tbody>
           ${pedido.itens.map(it => {
             const jaRec = it.qtd_ja_recebida || 0;
             const aReceber = it.quantidade - jaRec;
+            let statusIcon, statusLabel, statusClass;
+            if (jaRec === 0) { statusIcon = '⚪'; statusLabel = 'Aguardando'; statusClass = 'warn'; }
+            else if (jaRec >= it.quantidade) { statusIcon = '🟢'; statusLabel = 'Retirado'; statusClass = 'ok'; }
+            else { statusIcon = '🟡'; statusLabel = 'Parcial'; statusClass = 'warn'; }
             return `
-            <tr>
+            <tr ${jaRec >= it.quantidade ? 'style="opacity:0.6"' : ''}>
+              <td><span class="badge ${statusClass}">${statusIcon} ${statusLabel}</span></td>
               <td>${it.sku ? `<code>${it.sku}</code> ` : ''}${it.produto_nome}</td>
               <td class="text-right">
                 ${editavel ? `<input type="number" min="1" style="width:70px;text-align:right" value="${it.quantidade}" data-item="${it.id}" data-field="quantidade" />` : it.quantidade}
               </td>
-              <td class="text-right">
-                ${editavel ? `<input type="number" min="0" max="${it.quantidade}" style="width:60px;text-align:right" value="${jaRec}" data-item="${it.id}" data-jarec="1" title="Quantidade ja retirada antes (nao vai somar no estoque ao Receber)" />` : jaRec}
-                ${jaRec > 0 ? `<div class="text-small text-muted">falta ${aReceber}</div>` : ''}
+              <td class="text-right" style="white-space:nowrap">
+                ${editavel ? `<input type="number" min="0" max="${it.quantidade}" style="width:60px;text-align:right" value="${jaRec}" data-item="${it.id}" data-jarec="1" title="Quantidade ja retirada antes" />
+                <button class="btn-secondary" style="padding:2px 6px;font-size:.75rem;margin-left:4px" data-tudo="${it.id}" data-qtd="${it.quantidade}" title="Marcar tudo como retirado">✓ tudo</button>
+                ${jaRec > 0 ? `<button class="btn-secondary" style="padding:2px 6px;font-size:.75rem;margin-left:2px" data-zerar="${it.id}" title="Zerar retirada">↺</button>` : ''}` : jaRec}
               </td>
+              <td class="text-right ${aReceber === 0 ? 'text-muted' : 'value-money'}">${aReceber}</td>
               <td class="text-right">
                 ${editavel ? `<input type="number" step="0.01" style="width:100px;text-align:right" value="${it.custo_unitario}" data-item="${it.id}" data-field="custo_unitario" />` : money(it.custo_unitario)}
               </td>
               <td class="text-right value-money">${money(it.quantidade * it.custo_unitario)}</td>
               <td>${editavel ? `<button class="btn-secondary" data-remitem="${it.id}">x</button>` : ''}</td>
             </tr>
-          `;}).join('') || '<tr><td colspan="6" class="text-muted">Sem itens.</td></tr>'}
+          `;}).join('') || '<tr><td colspan="8" class="text-muted">Sem itens.</td></tr>'}
         </tbody>
         <tfoot>
           <tr style="font-weight:700;border-top:2px solid var(--cinza-2)">
-            <td>${pedido.itens.reduce((s, it) => s + it.quantidade, 0)} pecas total</td>
-            <td class="text-right text-small text-muted">a receber: ${pedido.itens.reduce((s, it) => s + (it.quantidade - (it.qtd_ja_recebida||0)), 0)}</td>
-            <td colspan="2"></td>
+            <td colspan="2">${pedido.itens.reduce((s, it) => s + it.quantidade, 0)} pecas total</td>
+            <td class="text-right"></td>
+            <td class="text-right text-small text-muted">${pedido.itens.reduce((s, it) => s + (it.qtd_ja_recebida||0), 0)} ja retiradas</td>
+            <td class="text-right text-small text-muted">${pedido.itens.reduce((s, it) => s + (it.quantidade - (it.qtd_ja_recebida||0)), 0)} a receber</td>
+            <td colspan="1"></td>
             <td class="text-right value-money">${money(pedido.valor_total)}</td>
             <td></td>
           </tr>
         </tfoot>
       </table>
+      ${editavel && pedido.itens.some(it => (it.qtd_ja_recebida||0) < it.quantidade) ? `
+      <div class="mt-1" style="display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn-secondary" id="btnMarcarTudoRetirado">✓ Marcar todos os itens como retirados</button>
+      </div>` : ''}
     </div>
   `;
 
@@ -1241,6 +1262,49 @@ async function renderPedidoDetalhe(id) {
           renderPedidoDetalhe(id);
         } catch (err) { alert('Erro: ' + err.message); }
       });
+    });
+
+    $$('[data-tudo]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const itemId = btn.dataset.tudo;
+        const qtd = Number(btn.dataset.qtd);
+        try {
+          await api(`api/pedidos-compra/${id}/itens/${itemId}/ja-recebida`, {
+            method: 'PATCH',
+            body: JSON.stringify({ qtd_ja_recebida: qtd }),
+          });
+          renderPedidoDetalhe(id);
+        } catch (err) { alert('Erro: ' + err.message); }
+      });
+    });
+
+    $$('[data-zerar]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const itemId = btn.dataset.zerar;
+        try {
+          await api(`api/pedidos-compra/${id}/itens/${itemId}/ja-recebida`, {
+            method: 'PATCH',
+            body: JSON.stringify({ qtd_ja_recebida: 0 }),
+          });
+          renderPedidoDetalhe(id);
+        } catch (err) { alert('Erro: ' + err.message); }
+      });
+    });
+
+    const btnMarcarTudo = $('#btnMarcarTudoRetirado');
+    if (btnMarcarTudo) btnMarcarTudo.addEventListener('click', async () => {
+      if (!confirm('Marcar TODOS os itens do pedido como ja retirados? Isso significa que voce ja recebeu tudo fisicamente.')) return;
+      try {
+        for (const it of pedido.itens) {
+          if ((it.qtd_ja_recebida || 0) < it.quantidade) {
+            await api(`api/pedidos-compra/${id}/itens/${it.id}/ja-recebida`, {
+              method: 'PATCH',
+              body: JSON.stringify({ qtd_ja_recebida: it.quantidade }),
+            });
+          }
+        }
+        renderPedidoDetalhe(id);
+      } catch (err) { alert('Erro: ' + err.message); }
     });
 
     $$('[data-remitem]').forEach(b => b.addEventListener('click', async () => {
