@@ -248,11 +248,19 @@ routes.produtos = async () => {
       </div>
     </div>
     <div class="card">
+      <div class="text-small text-muted mb-1">
+        <strong>Estoque real</strong> = o que voce tem fisicamente (fonte da verdade da Cargon).
+        <strong>Anunciado ML</strong> = o que esta publicado nos anuncios (voce infla pra vender mais).
+        <strong>Diferenca</strong> = quantas voce precisa buscar rapido no Oliver se vender.
+      </div>
       <table>
         <thead>
           <tr>
             <th>SKU</th><th>Nome</th><th>Custo</th><th>Preco</th>
-            <th class="text-right">Estoque</th><th class="text-right">Minimo</th><th>Status</th>
+            <th class="text-right">Estoque real</th>
+            <th class="text-right">Anunciado ML</th>
+            <th class="text-right">Diferenca</th>
+            <th class="text-right">Min</th><th>Status</th>
           </tr>
         </thead>
         <tbody id="produtosBody">
@@ -271,6 +279,8 @@ routes.produtos = async () => {
 function rowProduto(p) {
   const status = p.estoque_atual <= 0 ? 'critico' : (p.estoque_atual <= p.estoque_minimo ? 'warn' : 'ok');
   const statusLabel = status === 'critico' ? 'Critico' : (status === 'warn' ? 'Atencao' : 'OK');
+  const anunciado = p.total_anunciado_ml || 0;
+  const diff = anunciado - p.estoque_atual;
   return `
     <tr>
       <td><code>${p.sku}</code></td>
@@ -278,6 +288,8 @@ function rowProduto(p) {
       <td class="value-money">${money(p.custo_unitario)}</td>
       <td class="value-money">${money(p.preco_venda)}</td>
       <td class="text-right value-money">${p.estoque_atual}</td>
+      <td class="text-right text-muted">${anunciado || '-'}</td>
+      <td class="text-right ${diff > 0 ? 'value-money' : 'text-muted'}">${diff > 0 ? '+' + diff : (anunciado ? diff : '-')}</td>
       <td class="text-right text-muted">${p.estoque_minimo}</td>
       <td><span class="badge ${status}">${statusLabel}</span></td>
     </tr>

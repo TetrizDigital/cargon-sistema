@@ -130,6 +130,18 @@ async function syncVendas() {
                 VALUES ('MERCADO_LIVRE', 'vendas', 'ok', ?, ?)`)
       .run(processados, `desde ${desde}`);
 
+    // Atualiza qtd anunciada dos MLBs (independente do sync de vendas)
+    try {
+      const r = await syncEstoqueAnunciado();
+      db.prepare(`INSERT INTO sync_logs (canal, tipo, status, itens_processados, mensagem)
+                  VALUES ('MERCADO_LIVRE', 'estoque_anunciado', 'ok', ?, ?)`)
+        .run(r.atualizados, 'qtd anunciada atualizada');
+    } catch (err) {
+      db.prepare(`INSERT INTO sync_logs (canal, tipo, status, mensagem)
+                  VALUES ('MERCADO_LIVRE', 'estoque_anunciado', 'erro', ?)`)
+        .run(err.message);
+    }
+
     return { ok: true, processados, ms: Date.now() - inicio };
   } catch (err) {
     db.prepare(`INSERT INTO sync_logs (canal, tipo, status, mensagem)
@@ -143,6 +155,17 @@ async function upsertVenda(o) {
   const idExt = String(o.id);
   const data = o.date_created;
   const status = o.status;
+
+  // Detecta mudanca de status pra devolver estoque em cancelamentos
+  const vendaAnterior = db.prepare(
+    "SELECT id, status FROM vendas WHERE canal = 'MERCADO_LIVRE' AND id_externo_pedido = ?"
+  ).get(idExt);
+  const foiCancelada = vendaAnterior
+    && ['paid', 'shipped', 'delivered'].includes(vendaAnterior.status)
+    && ['cancelled', 'refunded'].includes(status);
+  if (foiCancelada) {
+    devolverEstoqueVenda(vendaAnterior.id, 'ML pedido ' + idExt + ' cancelado');
+  }
   const valor = o.total_amount || 0;
   const shipping = o.shipping || {};
   const buyer = o.buyer || {};
@@ -287,11 +310,73 @@ async function upsertVenda(o) {
   }
 }
 
+// Atualiza qtd_anunciada dos MLBs vinculados (para painel de comparacao com estoque real)
+async function syncEstoqueAnunciado() {
+  const vinculos = db.prepare(`
+    SELECT DISTINCT id_externo FROM produto_vinculos
+    WHERE canal = 'MERCADO_LIVRE' AND ativo = 1
+  `).all();
+  if (vinculos.length === 0) return { atualizados: 0 };
+
+  // /items suporta ate 20 ids por chamada
+  const ids = vinculos.map(v => v.id_externo);
+  let atualizados = 0;
+  for (let i = 0; i < ids.length; i += 20) {
+    const batch = ids.slice(i, i + 20);
+    try {
+      const data = await apiGet('/items?ids=' + batch.join(',') + '&attributes=id,available_quantity,sold_quantity,status');
+      for (const wrap of data) {
+        if (wrap.code !== 200) continue;
+        const item = wrap.body;
+        db.prepare(`
+          UPDATE produto_vinculos
+          SET qtd_anunciada = ?, qtd_anunciada_atualizado = datetime('now')
+          WHERE canal = 'MERCADO_LIVRE' AND id_externo = ?
+        `).run(item.available_quantity, item.id);
+        atualizados++;
+      }
+    } catch (err) {
+      console.error('[ml][sync estoque anunciado batch]', err.message);
+    }
+  }
+  return { atualizados };
+}
+
+// Devolve o estoque previamente baixado por uma venda (usado quando venda vira cancelled)
+function devolverEstoqueVenda(vendaId, motivo) {
+  const saidas = db.prepare(`
+    SELECT produto_id, quantidade FROM movimentos_estoque
+    WHERE referencia_tipo = 'venda' AND referencia_id = ? AND tipo = 'SAIDA_VENDA'
+  `).all(vendaId);
+  if (saidas.length === 0) return;
+
+  // Evita devolver 2x
+  const jaDevolveu = db.prepare(`
+    SELECT 1 FROM movimentos_estoque
+    WHERE referencia_tipo = 'venda' AND referencia_id = ? AND tipo = 'RETORNO_CANCELAMENTO'
+    LIMIT 1
+  `).get(vendaId);
+  if (jaDevolveu) return;
+
+  for (const s of saidas) {
+    const devolucao = Math.abs(s.quantidade); // saida vem negativa, devolvo positivo
+    const p = db.prepare('SELECT estoque_atual FROM produtos WHERE id = ?').get(s.produto_id);
+    if (!p) continue;
+    const novoSaldo = p.estoque_atual + devolucao;
+    db.prepare('UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime(\'now\') WHERE id = ?').run(novoSaldo, s.produto_id);
+    db.prepare(`
+      INSERT INTO movimentos_estoque (produto_id, tipo, quantidade, saldo_apos, referencia_tipo, referencia_id, observacao)
+      VALUES (?, 'RETORNO_CANCELAMENTO', ?, ?, 'venda', ?, ?)
+    `).run(s.produto_id, devolucao, novoSaldo, vendaId, motivo);
+  }
+}
+
 module.exports = {
   buildAuthUrl,
   exchangeCodeForToken,
   syncVendas,
+  syncEstoqueAnunciado,
   apiGet,
   getAccessToken,
-  _upsertVendaFromOrder: upsertVenda, // exportado pra recompute
+  _upsertVendaFromOrder: upsertVenda,
 };

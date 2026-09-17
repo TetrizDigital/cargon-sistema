@@ -4,13 +4,26 @@ const { db } = require('../db');
 
 const router = express.Router();
 
-// Listar todos
+// Listar todos com qtd_anunciada por canal (comparar estoque real vs anunciado)
 router.get('/', (req, res) => {
   const filtro = req.query.q ? '%' + req.query.q + '%' : null;
   const query = filtro
     ? 'SELECT * FROM produtos WHERE (nome LIKE ? OR sku LIKE ? OR modelo LIKE ?) ORDER BY nome'
     : 'SELECT * FROM produtos ORDER BY nome';
   const rows = filtro ? db.prepare(query).all(filtro, filtro, filtro) : db.prepare(query).all();
+
+  // Anexa qtd_anunciada por canal (soma de todos os anuncios daquele canal)
+  const stmt = db.prepare(`
+    SELECT canal, COALESCE(SUM(qtd_anunciada), 0) AS total_anunciado,
+           MAX(qtd_anunciada_atualizado) AS ultima_leitura
+    FROM produto_vinculos
+    WHERE produto_id = ? AND ativo = 1 AND qtd_anunciada IS NOT NULL
+    GROUP BY canal
+  `);
+  for (const p of rows) {
+    p.anunciado = stmt.all(p.id);
+    p.total_anunciado_ml = (p.anunciado.find(a => a.canal === 'MERCADO_LIVRE') || {}).total_anunciado || 0;
+  }
   res.json(rows);
 });
 

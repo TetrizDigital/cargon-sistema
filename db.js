@@ -204,6 +204,8 @@ addColumn('vendas', 'shipping_cost_seller',  'REAL NOT NULL DEFAULT 0');   // fr
 addColumn('vendas', 'shipping_id',           'TEXT');                       // id do shipment ML
 addColumn('vendas', 'payment_method',        'TEXT');                       // pix, credit_card, etc
 addColumn('vendas', 'taxa_detalhes',         'TEXT');                       // JSON com detalhes brutos (fee_details, etc)
+addColumn('produto_vinculos', 'qtd_anunciada',           'INTEGER');        // estoque publicado no canal (para comparar com real)
+addColumn('produto_vinculos', 'qtd_anunciada_atualizado', 'TEXT');           // quando foi lida do canal
 
 // -------- Tabelas de pedidos de compra e inventario --------
 db.exec(`

@@ -53,6 +53,37 @@ function upsertVendaSite(p) {
   const idExt = p.id;
   const data = p.paid_at || p.created_at;
 
+  // Detecta cancelamento pra devolver estoque
+  const vendaAnterior = db.prepare(
+    "SELECT id, status FROM vendas WHERE canal = 'SITE_PROPRIO' AND id_externo_pedido = ?"
+  ).get(idExt);
+  const foiCancelada = vendaAnterior
+    && ['pago', 'enviado', 'entregue'].includes(vendaAnterior.status)
+    && ['cancelado', 'reembolsado'].includes(p.status);
+  if (foiCancelada) {
+    const saidas = db.prepare(`
+      SELECT produto_id, quantidade FROM movimentos_estoque
+      WHERE referencia_tipo = 'venda' AND referencia_id = ? AND tipo = 'SAIDA_VENDA'
+    `).all(vendaAnterior.id);
+    const jaDevolveu = db.prepare(`
+      SELECT 1 FROM movimentos_estoque
+      WHERE referencia_tipo = 'venda' AND referencia_id = ? AND tipo = 'RETORNO_CANCELAMENTO' LIMIT 1
+    `).get(vendaAnterior.id);
+    if (!jaDevolveu) {
+      for (const s of saidas) {
+        const devolucao = Math.abs(s.quantidade);
+        const pp = db.prepare('SELECT estoque_atual FROM produtos WHERE id = ?').get(s.produto_id);
+        if (!pp) continue;
+        const novoSaldo = pp.estoque_atual + devolucao;
+        db.prepare('UPDATE produtos SET estoque_atual = ?, atualizado_em = datetime(\'now\') WHERE id = ?').run(novoSaldo, s.produto_id);
+        db.prepare(`
+          INSERT INTO movimentos_estoque (produto_id, tipo, quantidade, saldo_apos, referencia_tipo, referencia_id, observacao)
+          VALUES (?, 'RETORNO_CANCELAMENTO', ?, ?, 'venda', ?, ?)
+        `).run(s.produto_id, devolucao, novoSaldo, vendaAnterior.id, 'Site pedido ' + idExt + ' cancelado');
+      }
+    }
+  }
+
   const info = db.prepare(`
     INSERT INTO vendas (canal, id_externo_pedido, data_venda, status, comprador_nome, comprador_email, comprador_telefone, valor_total, valor_frete, frete_confirmado, taxa_canal, valor_liquido)
     VALUES ('SITE_PROPRIO', ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)
