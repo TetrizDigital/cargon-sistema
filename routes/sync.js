@@ -3,6 +3,7 @@ const express = require('express');
 const { db } = require('../db');
 const ml = require('../integrations/mercadolivre');
 const site = require('../integrations/site');
+const mp = require('../integrations/mercadopago');
 
 const router = express.Router();
 
@@ -34,6 +35,15 @@ router.post('/mercadolivre', async (_req, res) => {
 router.post('/site', async (_req, res) => {
   try {
     const r = await site.syncVendas();
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/mercadopago', async (_req, res) => {
+  try {
+    const r = await mp.syncPayments();
     res.json(r);
   } catch (err) {
     res.status(500).json({ error: err.message });

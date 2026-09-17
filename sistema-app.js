@@ -46,9 +46,11 @@ const sync = require('./routes/sync');
 const pedidosCompra = require('./routes/pedidosCompra');
 const inventario = require('./routes/inventario');
 const config = require('./routes/config');
+const mercadopago = require('./routes/mercadopago');
 
 const ml = require('./integrations/mercadolivre');
 const site = require('./integrations/site');
+const mp = require('./integrations/mercadopago');
 
 function getSessionSecret() {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
@@ -111,6 +113,7 @@ app.use('/api/sync', requireAuth, sync);
 app.use('/api/pedidos-compra', requireAuth, pedidosCompra);
 app.use('/api/inventario', requireAuth, inventario);
 app.use('/api/config', requireAuth, config);
+app.use('/api/mp', requireAuth, mercadopago);
 
 // -------- OAuth ML --------
 app.get('/api/ml/authorize', requireAuth, (_req, res) => {
@@ -176,6 +179,13 @@ if (process.env.SYNC_ENABLED === 'true' && !global.__sistema_cron_started) {
   setTimeout(() => {
     setInterval(() => { financeiro.gerarLancamentosRecorrentes().catch(e => console.error('[sistema][cron contas]', e.message)); }, CONTAS_INTERVAL_MS);
   }, 3 * 60 * 1000);
+
+  if (process.env.MP_ACCESS_TOKEN) {
+    const MP_INTERVAL_MS = 15 * 60 * 1000; // 15 min offset
+    setTimeout(() => {
+      setInterval(() => { mp.syncPayments().catch(e => console.error('[sistema][cron mp]', e.message)); }, MP_INTERVAL_MS);
+    }, 11 * 60 * 1000);
+  }
 
   console.log('[sistema] jobs de sync agendados (setInterval)');
 }

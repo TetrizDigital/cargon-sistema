@@ -58,16 +58,18 @@ routes.dashboard = async () => {
   const per = periodoDoMes(DASHBOARD_STATE.offset);
   const qs = `?de=${per.de}&ate=${per.ate}`;
 
-  const [resumo, estoque, vendas] = await Promise.all([
+  const [resumo, estoque, vendas, saldoMp] = await Promise.all([
     api('api/financeiro/resumo' + qs),
     api('api/estoque'),
     api('api/vendas' + qs + '&limit=10'),
+    api('api/mp/saldo').catch(() => ({ saldo: { disponivel_estimado: 0, a_liberar: 0, a_liberar_qtd: 0, total: 0 } })),
   ]);
 
   const v = resumo.vendas || { totais: {}, cmv: 0, lucro_bruto: 0, taxa_media_pct: 0, ticket_medio: 0, por_canal: [] };
   const t = v.totais || {};
   const aReceber = resumo.a_receber_ml || { qtd: 0, total_liquido: 0, total_bruto: 0 };
   const proximosRepasses = resumo.proximos_repasses || [];
+  const mpSaldo = saldoMp.saldo || { disponivel_estimado: 0, a_liberar: 0, total: 0 };
 
   $('#content').innerHTML = `
     <div class="page-header">
@@ -80,17 +82,27 @@ routes.dashboard = async () => {
       </div>
     </div>
 
-    <h3 class="mb-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">A receber do Mercado Livre</h3>
+    <h3 class="mb-1" style="color:var(--cinza-3);font-size:.85rem;text-transform:uppercase;letter-spacing:1px">Dinheiro (Mercado Livre + Mercado Pago)</h3>
     <div class="kpi-grid">
+      <div class="kpi ok">
+        <div class="kpi-label">Saldo MP disponivel</div>
+        <div class="kpi-value">${money(mpSaldo.disponivel_estimado)}</div>
+        <div class="kpi-sub">estimado</div>
+      </div>
+      <div class="kpi warn">
+        <div class="kpi-label">MP a liberar</div>
+        <div class="kpi-value">${money(mpSaldo.a_liberar)}</div>
+        <div class="kpi-sub">aguardando prazo MP</div>
+      </div>
       <div class="kpi ${aReceber.total_liquido > 0 ? 'ok' : ''}">
-        <div class="kpi-label">Total a receber (liquido)</div>
+        <div class="kpi-label">A receber ML (liquido)</div>
         <div class="kpi-value">${money(aReceber.total_liquido)}</div>
-        <div class="kpi-sub">${aReceber.qtd} venda${aReceber.qtd === 1 ? '' : 's'} paga${aReceber.qtd === 1 ? '' : 's'} · bruto ${money(aReceber.total_bruto)}</div>
+        <div class="kpi-sub">${aReceber.qtd} venda${aReceber.qtd === 1 ? '' : 's'} · bruto ${money(aReceber.total_bruto)}</div>
       </div>
       <div class="kpi">
-        <div class="kpi-label">Proximos repasses</div>
-        <div class="kpi-value">${proximosRepasses.length}</div>
-        <div class="kpi-sub">${proximosRepasses.length ? 'primeira liberacao: ' + fmtDate(proximosRepasses[0].data) : 'sem repasses previstos'}</div>
+        <div class="kpi-label">Total a receber</div>
+        <div class="kpi-value">${money(mpSaldo.total + aReceber.total_liquido)}</div>
+        <div class="kpi-sub">MP total + ML liquido</div>
       </div>
     </div>
 
@@ -206,12 +218,14 @@ function labelCanal(c) {
   return c === 'MERCADO_LIVRE' ? 'Mercado Livre'
        : c === 'SITE_PROPRIO' ? 'Site Cargon'
        : c === 'TIKTOK_SHOP' ? 'TikTok Shop'
+       : c === 'MERCADO_PAGO' ? 'Mercado Pago'
        : c;
 }
 function badgeCanal(c) {
   return c === 'MERCADO_LIVRE' ? 'canal-ml'
        : c === 'SITE_PROPRIO' ? 'canal-site'
        : c === 'TIKTOK_SHOP' ? 'canal-tiktok'
+       : c === 'MERCADO_PAGO' ? 'canal-ml'
        : '';
 }
 
@@ -430,6 +444,7 @@ routes.sync = async () => {
       <div class="actions">
         <button id="btnSyncML" class="btn-primary">Sync ML agora</button>
         <button id="btnSyncSite" class="btn-primary">Sync Site agora</button>
+        <button id="btnSyncMp" class="btn-primary">Sync MP agora</button>
       </div>
     </div>
     <div class="card">
@@ -487,6 +502,101 @@ routes.sync = async () => {
     } catch (err) {
       alert('Erro: ' + err.message);
     }
+  });
+  $('#btnSyncMp').addEventListener('click', async () => {
+    try {
+      const r = await api('api/sync/mercadopago', { method: 'POST' });
+      alert(`Mercado Pago: ${r.processados} pagamentos processados`);
+      routes.sync();
+    } catch (err) {
+      alert('Erro: ' + err.message);
+    }
+  });
+};
+
+// ============ MERCADO PAGO ============
+routes.mp = async () => {
+  const per = periodoDoMes(DASHBOARD_STATE.offset);
+  const [saldo, movs] = await Promise.all([
+    api('api/mp/saldo'),
+    api(`api/mp/movimentos?de=${per.de}&ate=${per.ate}&limit=300`),
+  ]);
+  const s = saldo.saldo;
+  const prox = saldo.proximas_liberacoes || [];
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h2>Mercado Pago</h2>
+      <div class="actions">
+        <button id="btnSyncMp" class="btn-primary">Sync agora</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi ok">
+        <div class="kpi-label">Saldo disponivel (estimado)</div>
+        <div class="kpi-value">${money(s.disponivel_estimado)}</div>
+        <div class="kpi-sub">liberado ate hoje</div>
+      </div>
+      <div class="kpi warn">
+        <div class="kpi-label">A liberar</div>
+        <div class="kpi-value">${money(s.a_liberar)}</div>
+        <div class="kpi-sub">${s.a_liberar_qtd} pagamento${s.a_liberar_qtd === 1 ? '' : 's'} aguardando</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Total no MP</div>
+        <div class="kpi-value">${money(s.total)}</div>
+        <div class="kpi-sub">disponivel + a liberar</div>
+      </div>
+    </div>
+
+    ${prox.length > 0 ? `
+    <div class="card mt-1">
+      <h3>Proximas liberacoes (45 dias)</h3>
+      <table>
+        <thead><tr><th>Data</th><th class="text-right">Qtd</th><th class="text-right">Valor liquido</th></tr></thead>
+        <tbody>
+          ${prox.map(pl => `
+            <tr>
+              <td>${fmtDate(pl.data)}</td>
+              <td class="text-right">${pl.qtd}</td>
+              <td class="text-right value-money positivo">${money(pl.valor)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    ` : ''}
+
+    <div class="card mt-1">
+      <h3>Movimentos do mes (${per.label}) — ${movs.movimentos.length}</h3>
+      <div class="text-small text-muted mb-1">Bruto: ${money(movs.resumo.bruto)} · Taxas MP: ${money(movs.resumo.taxas)} · Liquido: ${money(movs.resumo.liquido)}</div>
+      <table>
+        <thead><tr><th>Data</th><th>Status</th><th>Descricao</th><th>Pagador</th><th class="text-right">Bruto</th><th class="text-right">Taxa MP</th><th class="text-right">Liquido</th><th>Libera em</th></tr></thead>
+        <tbody>
+          ${movs.movimentos.map(m => `
+            <tr>
+              <td>${fmtDate(m.date_created)}</td>
+              <td><span class="badge ${m.status === 'approved' ? 'ok' : m.status === 'refunded' || m.status === 'cancelled' ? 'critico' : 'warn'}">${m.status}</span></td>
+              <td class="text-small">${m.descricao || m.external_reference || '-'}</td>
+              <td class="text-small">${m.payer_nome || m.payer_email || '-'}</td>
+              <td class="text-right value-money">${money(m.transaction_amount)}</td>
+              <td class="text-right value-money negativo">${money(m.taxa_mp)}</td>
+              <td class="text-right value-money positivo">${money(m.net_received_amount)}</td>
+              <td class="text-small text-muted">${m.money_release_date ? fmtDate(m.money_release_date) : '-'}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="8" class="text-muted">Sem movimentos no periodo. Rode "Sync agora" se ainda nao sincronizou.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  $('#btnSyncMp').addEventListener('click', async () => {
+    try {
+      const r = await api('api/sync/mercadopago', { method: 'POST' });
+      alert(`MP: ${r.processados} pagamentos processados em ${r.ms}ms`);
+      routes.mp();
+    } catch (err) { alert('Erro: ' + err.message); }
   });
 };
 

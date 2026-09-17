@@ -279,6 +279,42 @@ try {
   db.prepare(`INSERT OR IGNORE INTO fornecedores (nome, contato) VALUES ('Oliver Parts', 'Thaiza')`).run();
 } catch {}
 
+// -------- Tabela de movimentos Mercado Pago --------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS movimentos_mp (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mp_payment_id TEXT UNIQUE NOT NULL,
+    tipo TEXT NOT NULL,
+    status TEXT NOT NULL,
+    status_detail TEXT,
+    transaction_amount REAL NOT NULL,
+    net_received_amount REAL NOT NULL DEFAULT 0,
+    taxa_mp REAL NOT NULL DEFAULT 0,
+    outras_taxas REAL NOT NULL DEFAULT 0,
+    payment_method_id TEXT,
+    payment_type_id TEXT,
+    payer_email TEXT,
+    payer_id TEXT,
+    payer_nome TEXT,
+    external_reference TEXT,
+    descricao TEXT,
+    money_release_date TEXT,
+    date_created TEXT NOT NULL,
+    date_approved TEXT,
+    date_last_updated TEXT,
+    venda_id INTEGER,
+    raw_json TEXT,
+    criado_em TEXT DEFAULT (datetime('now')),
+    atualizado_em TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (venda_id) REFERENCES vendas(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_mp_status ON movimentos_mp(status);
+  CREATE INDEX IF NOT EXISTS idx_mp_date_created ON movimentos_mp(date_created);
+  CREATE INDEX IF NOT EXISTS idx_mp_release ON movimentos_mp(money_release_date);
+  CREATE INDEX IF NOT EXISTS idx_mp_extref ON movimentos_mp(external_reference);
+`);
+
 function getSetting(key, defaultValue = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : defaultValue;
